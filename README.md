@@ -194,6 +194,17 @@ Reports support human tables and clean JSON.
 - No inventory tracking
 - No multi-currency or photos
 
+## Documentation
+
+Detailed documentation lives in the `docs/` directory:
+
+- [docs/index.md](docs/index.md) — entry point with links to all topics
+- Installation, getting started, full command reference, nutrition model, reports, agent/JSON usage, data model details, and troubleshooting.
+
+When the package is installed (via PKGBUILD or equivalent), these files are placed under `/usr/share/doc/nutlog/docs/` for offline reading.
+
+The CLI `--help` text remains the authoritative reference for syntax.
+
 ## Development
 
 ```bash

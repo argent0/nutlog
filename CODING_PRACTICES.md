@@ -50,6 +50,7 @@ This document defines the coding standards and best practices for the `nutlog` p
 8. **Documentation**
    - Public items must have doc comments.
    - CLI help text is the primary user documentation.
+   - Detailed user-facing documentation goes in the `docs/` directory (markdown). The `PKGBUILD` must be updated so the files are installed to `/usr/share/doc/$pkgname/docs/`.
    - Update `CODING_PRACTICES.md` when patterns change.
 
 ## Recommended Tooling
