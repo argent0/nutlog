@@ -18,24 +18,39 @@ The master `nutrients` table defines the vocabulary (name + canonical unit + opt
 
 ## Setting Nutrition via CLI
 
-Only the base macros + reference amount are supported through the CLI today:
+The `product nutrition set` command accepts the reference amount plus macros. It now also supports micronutrients and active compounds directly:
 
 ```bash
-nutlog product nutrition set 42 \
-  --reference-quantity 100 --reference-unit g \
-  --energy-kcal 250 --protein-g 12 --carbohydrates-g 30 --fat-g 8
+nutlog product nutrition set 13 \
+  --reference-quantity 1 --reference-unit capsule \
+  --energy-kcal 10 \
+  --micronutrient "Omega 3 EPA" 181 mg \
+  --micronutrient "Omega 3 DHA" 121 mg \
+  --micronutrient "Creatine Monohydrate" 5 g
 ```
 
-Micronutrients must currently be inserted manually (or by an advanced agent/script) into the `product_micronutrients` table using the IDs from `nutrient list`.
+- `--micronutrient` is repeatable. Each use takes three values: `NAME AMOUNT UNIT`.
+- Unknown nutrient names are created automatically (with the supplied unit as their canonical unit and no recommended intake). Existing nutrients are matched case-insensitively by name.
+- For complex cases or machine-generated data you can also use:
 
-Example direct SQL (for illustration; prefer going through the tool when possible):
-
-```sql
-INSERT INTO product_micronutrients (product_id, nutrient_id, amount, unit)
-VALUES (42, 7, 2.5, 'µg');   -- Vitamin D, assuming id 7
+```bash
+nutlog product nutrition set 13 --json-file nutrition.json
 ```
 
-Future CLI extensions may add `--micronutrient` style flags or a JSON nutrition import command.
+Example `nutrition.json` (all macro fields and the micronutrients array are optional):
+
+```json
+{
+  "reference": { "quantity": 1.0, "unit": "capsule" },
+  "energy_kcal": 10,
+  "micronutrients": [
+    { "name": "Omega 3 EPA", "amount": 181, "unit": "mg" },
+    { "name": "Omega 3 DHA", "amount": 121, "unit": "mg" }
+  ]
+}
+```
+
+A `set` call fully replaces the nutrition facts for the product (both the macro row and the exact set of micronutrients). Previously set micronutrients that are omitted are removed.
 
 ## How Reports Scale Consumption
 
@@ -146,13 +161,15 @@ You can add more with `nutlog nutrient create "Vitamin B12" --unit µg --recomme
 
 ## Micronutrient Notes for Agents
 
-If you want full micronutrient support today:
+Micronutrients (and supplement actives) are now first-class via the CLI:
 
-- Use `nutrient list --json` to discover IDs.
-- After setting base nutrition, issue direct SQL or extend the tool (the DB schema already supports it).
-- Reports will automatically pick up and scale any micronutrients present.
+- Use `--micronutrient "Name" AMOUNT UNIT` (repeatable) on `product nutrition set`.
+- Or supply a complete payload with `--json-file nutrition.json` (see examples above).
+- New nutrient names supplied this way are created automatically.
+- Use `nutrient list --json` (or search) when you want stable IDs or to pre-create entries with a recommended intake.
+- `product show --json` and `report nutrition --json` both surface the full micronutrient data (reports scale them exactly like macros).
 
-The CLI `nutrition set` path deliberately stays simple (only macros) to keep the common case fast.
+The simple macro-only path remains fast for ordinary foods; the new flags unlock the full existing data model for supplements without requiring raw SQL.
 
 ## See Also
 

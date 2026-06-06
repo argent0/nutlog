@@ -225,3 +225,277 @@ fn report_nutrition_basic() {
     // 200/100 * 8 = 16
     assert!(s.contains("\"protein_g\": 16.0"));
 }
+
+#[test]
+fn product_nutrition_set_with_micronutrients_flags() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Fish Oil 1000mg");
+    cmd.assert().success();
+
+    // Set using the new --micronutrient repeatable flag (mix of seeded + simple macro)
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("1")
+        .arg("--reference-unit")
+        .arg("capsule")
+        .arg("--energy-kcal")
+        .arg("10")
+        .arg("--micronutrient")
+        .arg("Omega 3 EPA")
+        .arg("181")
+        .arg("mg")
+        .arg("--micronutrient")
+        .arg("Omega 3 DHA")
+        .arg("121")
+        .arg("mg");
+    cmd.assert().success();
+
+    // Verify via JSON show: micros are present with names, amounts, units and ids
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("product")
+        .arg("show")
+        .arg("1");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"reference\""));
+    assert!(s.contains("\"unit\": \"capsule\""));
+    assert!(s.contains("\"Omega 3 EPA\""));
+    assert!(s.contains("\"amount\": 181.0"));
+    assert!(s.contains("\"unit\": \"mg\""));
+    assert!(s.contains("\"Omega 3 DHA\""));
+    assert!(s.contains("\"nutrient_id\""));
+}
+
+#[test]
+fn product_nutrition_set_via_json_file() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+    let json_path = dir.path().join("nutrition.json");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Magnesium Tabs");
+    cmd.assert().success();
+
+    let payload = r#"{
+        "reference": {"quantity": 1.0, "unit": "tablet"},
+        "energy_kcal": null,
+        "micronutrients": [
+            {"name": "Magnesium elemental", "amount": 200.0, "unit": "mg"},
+            {"name": "Creatine Monohydrate", "amount": 0.5, "unit": "g"}
+        ]
+    }"#;
+    std::fs::write(&json_path, payload).unwrap();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--json-file")
+        .arg(&json_path);
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("product")
+        .arg("show")
+        .arg("1");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"Magnesium elemental\""));
+    assert!(s.contains("200.0"));
+    assert!(s.contains("\"Creatine Monohydrate\""));
+    assert!(s.contains("0.5"));
+}
+
+#[test]
+fn nutrition_set_auto_creates_nutrient() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Special Collagen");
+    cmd.assert().success();
+
+    // Use a name that does not exist in the seed list
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("10")
+        .arg("--reference-unit")
+        .arg("g")
+        .arg("--micronutrient")
+        .arg("Unicorn Collagen X")
+        .arg("7.5")
+        .arg("g");
+    cmd.assert().success();
+
+    // The nutrient should have been created on the fly
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("nutrient")
+        .arg("list");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("Unicorn Collagen X"));
+}
+
+#[test]
+fn report_nutrition_scales_micronutrients() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Creatine Powder");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("5")
+        .arg("--reference-unit")
+        .arg("g")
+        .arg("--micronutrient")
+        .arg("Creatine Monohydrate")
+        .arg("5")
+        .arg("g");
+    cmd.assert().success();
+
+    // Consume 10 g (2x the reference of 5 g)
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("consumption")
+        .arg("create")
+        .arg("1")
+        .arg("--quantity")
+        .arg("10")
+        .arg("--unit")
+        .arg("g");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("report")
+        .arg("nutrition");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    // 10g / 5g * 5g creatine = 10 g total
+    assert!(s.contains("\"Creatine Monohydrate\""));
+    assert!(s.contains("\"total_amount\": 10.0"));
+}
+
+#[test]
+fn product_nutrition_set_replaces_micronutrients() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Multi Supp");
+    cmd.assert().success();
+
+    // First set: two micros
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("1")
+        .arg("--reference-unit")
+        .arg("serving")
+        .arg("--micronutrient")
+        .arg("Omega 3 EPA")
+        .arg("100")
+        .arg("mg")
+        .arg("--micronutrient")
+        .arg("Hyaluronic acid")
+        .arg("30")
+        .arg("mg");
+    cmd.assert().success();
+
+    // Second set: only one different micro (should replace, not append)
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("1")
+        .arg("--reference-unit")
+        .arg("serving")
+        .arg("--micronutrient")
+        .arg("Collagen peptides")
+        .arg("2.5")
+        .arg("g");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("product")
+        .arg("show")
+        .arg("1");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"Collagen peptides\""));
+    assert!(s.contains("2.5"));
+    // The previous ones must be gone
+    assert!(!s.contains("Omega 3 EPA"));
+    assert!(!s.contains("Hyaluronic acid"));
+}

@@ -77,7 +77,7 @@ nutlog product nutrition set 1 \
 
 Human confirmation or JSON success object.
 
-See [Nutrition Tracking](nutrition-tracking.md) for the full model (including micronutrients via direct DB if needed).
+See [Nutrition Tracking](nutrition-tracking.md) for the full model (micronutrients and supplement actives are set with `--micronutrient` or `--json-file` on `product nutrition set`).
 
 ## 4. Record a Purchase
 

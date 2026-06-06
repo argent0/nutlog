@@ -162,6 +162,19 @@ fn run_migrations(conn: &Connection) -> Result<()> {
             ('Iron', 'mg', 18.0, '2026-01-01T00:00:00Z'),
             ('Potassium', 'mg', 4700.0, '2026-01-01T00:00:00Z');
         "#,
+        // v3: common supplement / active-compound nutrients (idempotent).
+        // These make the examples in spec/04-expand-micronutrients.md work immediately
+        // and address the "pre-populated nutrients insufficient for supplements" gap.
+        r#"
+        INSERT OR IGNORE INTO nutrients (name, unit, recommended_intake, created_at)
+        VALUES
+            ('Creatine Monohydrate', 'g', NULL, '2026-01-01T00:00:00Z'),
+            ('Omega 3 EPA', 'mg', NULL, '2026-01-01T00:00:00Z'),
+            ('Omega 3 DHA', 'mg', NULL, '2026-01-01T00:00:00Z'),
+            ('Magnesium elemental', 'mg', 420.0, '2026-01-01T00:00:00Z'),
+            ('Collagen peptides', 'g', NULL, '2026-01-01T00:00:00Z'),
+            ('Hyaluronic acid', 'mg', NULL, '2026-01-01T00:00:00Z');
+        "#,
     ];
 
     for (i, sql) in migrations.iter().enumerate() {

@@ -50,7 +50,7 @@ Use `nutlog --json product show <id>` to verify the `nutritional_information` bl
 
 ### Micronutrients never appear in reports
 
-- You must have rows in `product_micronutrients`.
+- You must have rows in `product_micronutrients` (normally created via `product nutrition set --micronutrient ...` or `--json-file`).
 - The base `product_nutritions` row must also exist (the report query joins on it).
 - Insert them directly or via future extended CLI.
 

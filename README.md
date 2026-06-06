@@ -86,7 +86,16 @@ nutlog product nutrition set 1 \
   --carbohydrates-g 12.3
 ```
 
-`nutlog --json product show <id>` includes `nutritional_information`.
+Micronutrients / active compounds (supplements etc.) are set the same way:
+
+```bash
+nutlog product nutrition set 13 \
+  --reference-quantity 1 --reference-unit capsule \
+  --micronutrient "Omega 3 EPA" 181 mg \
+  --micronutrient "Creatine Monohydrate" 5 g
+```
+
+`nutlog --json product show <id>` includes `nutritional_information` (macros + `micronutrients` array). Reports automatically scale and aggregate them.
 
 ### Nutrients (master list)
 

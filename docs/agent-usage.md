@@ -53,7 +53,7 @@ nutlog --json --db "$DB" product list
 
 1. Create product → capture the returned `id`.
 2. (Optional) create/find tags and attach.
-3. Call `product nutrition set <id> ...` with the reference amount + values from the label.
+3. Call `product nutrition set <id> ...` (with `--micronutrient NAME AMOUNT UNIT` as needed) using the reference amount + values from the label.
 
 ### Daily Logging
 

@@ -148,11 +148,18 @@ pub enum NutritionAction {
 
 #[derive(Args, Debug)]
 pub struct NutritionSetArgs {
+    /// Product ID to set (or replace) nutrition for.
     pub id: i64,
+
+    /// Reference quantity for the nutrition values (e.g. 100 for per 100 g, 1 for per capsule/serving).
+    /// Required unless --json-file is used (the payload inside the file must contain the reference).
     #[arg(long, value_name = "QTY")]
-    pub reference_quantity: f64,
+    pub reference_quantity: Option<f64>,
+
+    /// Reference unit (e.g. g, ml, capsule, tablet, serving, piece).
     #[arg(long, value_name = "UNIT")]
-    pub reference_unit: String,
+    pub reference_unit: Option<String>,
+
     #[arg(long)]
     pub energy_kcal: Option<f64>,
     #[arg(long)]
@@ -165,8 +172,26 @@ pub struct NutritionSetArgs {
     pub fiber_g: Option<f64>,
     #[arg(long)]
     pub sugars_g: Option<f64>,
-    // Micronutrients not exposed in simple CLI for set (use JSON? or extend later).
-    // For now, basic macros via flags; micros via future or direct DB ok for agent.
+
+    /// Micronutrient (or active compound). Repeat the flag for multiple.
+    /// Provide three values after the flag: NAME AMOUNT UNIT.
+    /// Examples:
+    ///   --micronutrient "Omega 3 EPA" 181 mg
+    ///   --micronutrient "Creatine Monohydrate" 5 g
+    ///   --micronutrient "Magnesium elemental" 200 mg
+    #[arg(
+        long,
+        value_names = ["NAME", "AMOUNT", "UNIT"],
+        num_args = 3,
+        action = clap::ArgAction::Append
+    )]
+    pub micronutrient: Vec<String>,
+
+    /// Load the complete nutrition payload (reference, macros, and micronutrients) from a JSON file.
+    /// The file shape uses a "reference" object and a "micronutrients" array of {name, amount, unit} objects.
+    /// When --json-file is supplied, other nutrition flags are ignored and the file is authoritative.
+    #[arg(long, value_name = "FILE")]
+    pub json_file: Option<String>,
 }
 
 // ---------- Nutrient ----------

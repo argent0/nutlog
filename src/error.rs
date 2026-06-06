@@ -33,6 +33,9 @@ pub enum NutlogError {
     #[error("invalid date: {0}")]
     InvalidDate(String),
 
+    #[error("invalid nutrition data: {0}")]
+    InvalidNutrition(String),
+
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
 

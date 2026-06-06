@@ -23,11 +23,11 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    let conn = open_db(cli.db.as_deref())?;
+    let mut conn = open_db(cli.db.as_deref())?;
 
     match cli.command {
         Commands::Product { action } => {
-            commands::handle_product(&conn, action, cli.json, cli.quiet)?;
+            commands::handle_product(&mut conn, action, cli.json, cli.quiet)?;
         }
         Commands::Nutrient { action } => {
             commands::handle_nutrient(&conn, action, cli.json, cli.quiet)?;
@@ -215,7 +215,7 @@ mod commands {
     // ---------- PRODUCT HANDLERS ----------
 
     pub fn handle_product(
-        conn: &Connection,
+        conn: &mut Connection,
         action: ProductAction,
         json: bool,
         quiet: bool,
@@ -510,8 +510,30 @@ mod commands {
         Ok(())
     }
 
-    fn set_nutrition(conn: &Connection, args: NutritionSetArgs) -> NutResult<()> {
-        // verify product exists
+    /// Ensure a nutrient row exists (by name, case-insensitive lookup).
+    /// If missing, insert it using the caller's provided name casing and the suggested unit
+    /// as its canonical unit (recommended_intake left NULL). Returns the nutrient id.
+    fn ensure_nutrient(conn: &Connection, name: &str, suggested_unit: &str) -> NutResult<i64> {
+        if let Some(id) = conn
+            .query_row(
+                "SELECT id FROM nutrients WHERE name = ?1 COLLATE NOCASE",
+                [name],
+                |r| r.get(0),
+            )
+            .optional()?
+        {
+            return Ok(id);
+        }
+        let now = now_utc();
+        conn.execute(
+            "INSERT INTO nutrients (name, unit, recommended_intake, created_at) VALUES (?1, ?2, NULL, ?3)",
+            params![name, suggested_unit, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    fn set_nutrition(conn: &mut Connection, args: NutritionSetArgs) -> NutResult<()> {
+        // verify product exists (outside tx for early exit; the write path will be atomic)
         let exists: i64 =
             conn.query_row("SELECT COUNT(*) FROM products WHERE id=?", [args.id], |r| {
                 r.get(0)
@@ -519,9 +541,100 @@ mod commands {
         if exists == 0 {
             return Err(NutlogError::ProductNotFound(args.id));
         }
-        let _now = now_utc(); // not used for nutri
-                              // upsert base
-        conn.execute(
+
+        // Determine the complete nutrition data from either --json-file or the flag arguments.
+        let (
+            ref_qty,
+            ref_unit,
+            energy_kcal,
+            protein_g,
+            carbohydrates_g,
+            fat_g,
+            fiber_g,
+            sugars_g,
+            micros_to_set, // Vec<(name, amount, unit)>
+        ) = if let Some(path) = &args.json_file {
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                NutlogError::InvalidNutrition(format!(
+                    "failed to read nutrition file '{}': {}",
+                    path, e
+                ))
+            })?;
+            let input: NutritionInput = serde_json::from_str(&content).map_err(|e| {
+                NutlogError::InvalidNutrition(format!(
+                    "invalid nutrition JSON in '{}': {}",
+                    path, e
+                ))
+            })?;
+            let mvec: Vec<(String, f64, String)> = input
+                .micronutrients
+                .into_iter()
+                .map(|mi| (mi.name, mi.amount, mi.unit))
+                .collect();
+            (
+                input.reference.quantity,
+                input.reference.unit,
+                input.energy_kcal,
+                input.protein_g,
+                input.carbohydrates_g,
+                input.fat_g,
+                input.fiber_g,
+                input.sugars_g,
+                mvec,
+            )
+        } else {
+            let rq = args.reference_quantity.ok_or_else(|| {
+                    NutlogError::InvalidNutrition(
+                        "--reference-quantity and --reference-unit are required (unless --json-file supplies the full payload)".to_string(),
+                    )
+                })?;
+            let ru = args.reference_unit.ok_or_else(|| {
+                    NutlogError::InvalidNutrition(
+                        "--reference-quantity and --reference-unit are required (unless --json-file supplies the full payload)".to_string(),
+                    )
+                })?;
+
+            let mut mvec: Vec<(String, f64, String)> = vec![];
+            let chunks = &args.micronutrient;
+            if !chunks.is_empty() && chunks.len() % 3 != 0 {
+                return Err(NutlogError::InvalidNutrition(
+                        "invalid --micronutrient usage: each flag must be followed by exactly NAME AMOUNT UNIT (3 values)".to_string(),
+                    ));
+            }
+            for chunk in chunks.chunks_exact(3) {
+                let name = chunk[0].clone();
+                let amt_str = &chunk[1];
+                let unit = chunk[2].clone();
+                let amt: f64 = amt_str.parse().map_err(|_| {
+                    NutlogError::InvalidNutrition(format!(
+                        "invalid amount '{}' for micronutrient '{}'; expected a number",
+                        amt_str, name
+                    ))
+                })?;
+                if !amt.is_finite() || amt < 0.0 {
+                    return Err(NutlogError::InvalidNutrition(format!(
+                        "micronutrient amount must be finite and >= 0 for '{}'",
+                        name
+                    )));
+                }
+                mvec.push((name, amt, unit));
+            }
+            (
+                rq,
+                ru,
+                args.energy_kcal,
+                args.protein_g,
+                args.carbohydrates_g,
+                args.fat_g,
+                args.fiber_g,
+                args.sugars_g,
+                mvec,
+            )
+        };
+
+        // Apply everything atomically so a "set" either fully succeeds or leaves the prior state.
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO product_nutritions (product_id, reference_quantity, reference_unit, energy_kcal, protein_g, carbohydrates_g, fat_g, fiber_g, sugars_g)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
              ON CONFLICT(product_id) DO UPDATE SET
@@ -534,14 +647,28 @@ mod commands {
                fiber_g=excluded.fiber_g,
                sugars_g=excluded.sugars_g",
             params![
-                args.id, args.reference_quantity, args.reference_unit,
-                args.energy_kcal, args.protein_g, args.carbohydrates_g,
-                args.fat_g, args.fiber_g, args.sugars_g
+                args.id, ref_qty, ref_unit,
+                energy_kcal, protein_g, carbohydrates_g,
+                fat_g, fiber_g, sugars_g
             ],
         )?;
-        // Note: micronutrients not set via this simple path (per current CLI). Agents can use future extension or raw if needed.
-        // For completeness, we could support --micronutrient but spec example uses flags for macros.
-        // To keep scope, leave micros for manual or later enhancement.
+
+        // Replace semantics for micronutrients: the provided list (possibly empty) becomes the exact set.
+        tx.execute(
+            "DELETE FROM product_micronutrients WHERE product_id = ?",
+            [args.id],
+        )?;
+        for (name, amt, unit) in micros_to_set {
+            let nid = ensure_nutrient(&tx, &name, &unit)?;
+            tx.execute(
+                "INSERT INTO product_micronutrients (product_id, nutrient_id, amount, unit)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(product_id, nutrient_id) DO UPDATE SET amount=excluded.amount, unit=excluded.unit",
+                params![args.id, nid, amt, unit],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(())
     }
 

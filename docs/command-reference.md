@@ -124,17 +124,46 @@ Success objects on both.
 ```bash
 nutlog product nutrition set <ID> \
   --reference-quantity <QTY> --reference-unit <UNIT> \
-  [--energy-kcal N] [--protein-g N] ... [--sugars-g N]
+  [--energy-kcal N] [--protein-g N] ... [--sugars-g N] \
+  [--micronutrient NAME AMOUNT UNIT ...]
 ```
 
-- Replaces / upserts the base macro row for the product.
-- Reference quantity + unit are **required** and define the "per X" that the nutrient numbers refer to.
-- Only macros are exposed in the CLI. Micronutrients can be inserted directly into `product_micronutrients` table (for advanced/agent use).
+- Replaces (upserts) the nutrition facts for the product.
+- `--reference-quantity` and `--reference-unit` are required unless you use `--json-file` (which must contain its own `reference` object).
+- Micronutrients and active compounds are supplied with the repeatable `--micronutrient` flag (three values: `NAME AMOUNT UNIT`):
+
+```bash
+nutlog product nutrition set 13 \
+  --reference-quantity 1 --reference-unit capsule \
+  --micronutrient "Omega 3 EPA" 181 mg \
+  --micronutrient "Omega 3 DHA" 121 mg \
+  --micronutrient "Creatine Monohydrate" 5 g
+```
+
+- A JSON payload can be supplied instead (or for very complex cases):
+
+```bash
+nutlog product nutrition set 13 --json-file nutrition.json
+```
+
+  The file must include at least a `reference`; macros and `micronutrients` (array of `{name, amount, unit}`) are optional. Example:
+
+  ```json
+  {
+    "reference": { "quantity": 1.0, "unit": "capsule" },
+    "micronutrients": [
+      { "name": "Omega 3 EPA", "amount": 181, "unit": "mg" }
+    ]
+  }
+  ```
+
+- A `set` call is authoritative: the micronutrients present after the call are exactly those supplied (omitted ones are removed). The same is true for the macro values.
+- Nutrient names are resolved case-insensitively. Unknown names are created automatically (the supplied unit becomes the nutrient's canonical unit; recommended intake is left blank).
 - No unit conversion is performed at set or report time (consumer qty and ref qty assumed compatible, e.g. both g or both ml).
 
 **Success**: simple `{ "success": true, "message": "Nutrition set for product N" }`
 
-See [nutrition-tracking.md](nutrition-tracking.md) for the full data shape and scaling rules.
+See [nutrition-tracking.md](nutrition-tracking.md) for the full data shape, JSON output examples, and scaling rules. `product show --json` includes the complete `nutritional_information` (macros + `micronutrients` array with `nutrient_id`, `name`, `amount`, `unit`).
 
 ## nutrient (master data)
 

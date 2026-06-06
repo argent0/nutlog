@@ -83,6 +83,31 @@ pub struct Micronutrient {
     pub name: Option<String>, // enriched on output
 }
 
+/// Input shape for a single micronutrient when using --json-file (or future structured input).
+/// Uses human name instead of nutrient_id; the implementation resolves/creates the nutrient.
+#[derive(Deserialize, Debug, Clone)]
+pub struct MicronutrientInput {
+    pub name: String,
+    pub amount: f64,
+    pub unit: String,
+}
+
+/// Full nutrition payload accepted by `product nutrition set --json-file`.
+/// Mirrors the settable parts of NutritionalInformation but is name-based for micros
+/// and only derives Deserialize (it is an input type).
+#[derive(Deserialize, Debug, Clone)]
+pub struct NutritionInput {
+    pub reference: ReferenceAmount,
+    pub energy_kcal: Option<f64>,
+    pub protein_g: Option<f64>,
+    pub carbohydrates_g: Option<f64>,
+    pub fat_g: Option<f64>,
+    pub fiber_g: Option<f64>,
+    pub sugars_g: Option<f64>,
+    #[serde(default)]
+    pub micronutrients: Vec<MicronutrientInput>,
+}
+
 // ---------- Nutrient ----------
 
 #[derive(Serialize, Debug)]
