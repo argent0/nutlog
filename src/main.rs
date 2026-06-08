@@ -1686,7 +1686,18 @@ mod commands {
                     if let Some(v) = report.totals.protein_g {
                         println!("  protein: {:.1} g", v);
                     }
-                    // ... abbreviated
+                    if let Some(v) = report.totals.carbohydrates_g {
+                        println!("  carbohydrates: {:.1} g", v);
+                    }
+                    if let Some(v) = report.totals.fat_g {
+                        println!("  fat: {:.1} g", v);
+                    }
+                    if let Some(v) = report.totals.fiber_g {
+                        println!("  fiber: {:.1} g", v);
+                    }
+                    if let Some(v) = report.totals.sugars_g {
+                        println!("  sugars: {:.1} g", v);
+                    }
                     if !report.micronutrients.is_empty() {
                         println!("  key micros:");
                         for m in report.micronutrients.iter().take(5) {

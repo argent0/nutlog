@@ -199,7 +199,15 @@ fn report_nutrition_basic() {
         .arg("--reference-unit")
         .arg("g")
         .arg("--protein-g")
-        .arg("8");
+        .arg("8")
+        .arg("--carbohydrates-g")
+        .arg("12")
+        .arg("--fat-g")
+        .arg("5")
+        .arg("--fiber-g")
+        .arg("2")
+        .arg("--sugars-g")
+        .arg("3");
     cmd.assert().success();
 
     let mut cmd = nutlog_cmd();
@@ -214,6 +222,7 @@ fn report_nutrition_basic() {
         .arg("g");
     cmd.assert().success();
 
+    // JSON report should include all macros including fiber
     let mut cmd = nutlog_cmd();
     cmd.arg("--db")
         .arg(&db)
@@ -224,6 +233,20 @@ fn report_nutrition_basic() {
     let s = String::from_utf8_lossy(&out);
     // 200/100 * 8 = 16
     assert!(s.contains("\"protein_g\": 16.0"));
+    assert!(s.contains("\"carbohydrates_g\": 24.0"));
+    assert!(s.contains("\"fat_g\": 10.0"));
+    assert!(s.contains("\"fiber_g\": 4.0"));
+    assert!(s.contains("\"sugars_g\": 6.0"));
+
+    // Human output should also show fiber (and other macros)
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db").arg(&db).arg("report").arg("nutrition");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("carbohydrates: 24.0 g"));
+    assert!(s.contains("fat: 10.0 g"));
+    assert!(s.contains("fiber: 4.0 g"));
+    assert!(s.contains("sugars: 6.0 g"));
 }
 
 #[test]
