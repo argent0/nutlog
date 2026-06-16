@@ -99,10 +99,23 @@ purchases (id, product_id REFERENCES products ON DELETE RESTRICT,
 consumptions (id, product_id REFERENCES ... ON DELETE CASCADE, quantity, unit,
               consumed_at, created_at)
 product_nutritions (product_id PK REFERENCES ... CASCADE, reference_*, macros...)
-product_micronutrients (id, product_id, nutrient_id, amount, unit) UNIQUE(product, nutrient)
+product_micronutrients (id, product_id, nutrient_id REFERENCES nutrients ON DELETE CASCADE,
+                        amount, unit) UNIQUE(product, nutrient)
 ```
 
 Foreign keys are enforced (`PRAGMA foreign_keys = ON`).
+
+### Delete behavior (CLI)
+
+| Entity        | Command                    | Notes |
+|---------------|----------------------------|-------|
+| `product`     | `product delete`           | Blocked if purchases exist unless `--force` (deletes purchases first) |
+| `nutrient`    | `nutrient delete`          | Blocked if referenced in `product_micronutrients` unless `--force` |
+| `purchase`    | `purchase delete`          | Unconditional |
+| `consumption` | `consumption delete`       | Unconditional |
+| `store`       | `store delete`             | Unconditional; purchases get `store_id` set to NULL |
+| `product-tag` | `product-tag delete`       | Unconditional; associations cascade |
+| `store-tag`   | `store-tag delete`         | Unconditional; associations cascade |
 
 ### Timestamps
 

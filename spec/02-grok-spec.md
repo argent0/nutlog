@@ -182,6 +182,8 @@ nutlog --json nutrient list
 nutlog nutrient create "Vitamin D" --unit µg --recommended-intake 15
 nutlog nutrient show <nutrient-id>
 nutlog nutrient search "vit d"
+nutlog nutrient delete <nutrient-id>          # fails if referenced in product nutrition
+nutlog nutrient delete <nutrient-id> --force
 ```
 
 - A reasonable set of common nutrients should be pre-populated on first run (or via migration).
@@ -233,6 +235,12 @@ nutlog purchase list --store <store-id>
 nutlog purchase show <purchase-id>
 ```
 
+### Delete a purchase
+
+```bash
+nutlog purchase delete <purchase-id>
+```
+
 ---
 
 ## Stores (Light CRM)
@@ -278,6 +286,12 @@ nutlog consumption create <product-id> \
 
 ```bash
 nutlog consumption list --since 2026-05-01 --json
+```
+
+### Delete a consumption record
+
+```bash
+nutlog consumption delete <consumption-id>
 ```
 
 ---

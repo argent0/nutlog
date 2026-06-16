@@ -154,6 +154,15 @@ nutlog store-tag search "super"
 
 Tags can be deleted (associations are removed).
 
+Individual purchase and consumption records can also be deleted by ID:
+
+```bash
+nutlog purchase delete 42
+nutlog consumption delete 5
+```
+
+Custom nutrients can be removed with `nutrient delete <id>` (use `--force` if products still reference them).
+
 ## Next
 
 - Full command syntax and every flag: [Command Reference](command-reference.md)

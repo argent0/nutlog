@@ -784,6 +784,37 @@ mod commands {
                     }
                 }
             }
+            NutrientAction::Delete { id, force } => {
+                let ref_count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM product_micronutrients WHERE nutrient_id = ?",
+                    [id],
+                    |r| r.get(0),
+                )?;
+                if ref_count > 0 && !force {
+                    let err = NutlogError::NutrientHasReferences(id);
+                    if json {
+                        print_error_json(&err.to_string());
+                    } else {
+                        eprintln!("{}", err);
+                    }
+                    std::process::exit(1);
+                }
+                let affected = conn.execute("DELETE FROM nutrients WHERE id = ?", [id])?;
+                if affected == 0 {
+                    if json {
+                        print_error_json(&format!("nutrient not found: {}", id));
+                    } else {
+                        eprintln!("not found");
+                    }
+                    std::process::exit(1);
+                }
+                let msg = format!("Deleted nutrient {}", id);
+                if json {
+                    print_success_json(Success::ok(msg.clone()));
+                } else {
+                    quiet_print(&msg, quiet);
+                }
+            }
         }
         Ok(())
     }
@@ -1134,6 +1165,23 @@ mod commands {
                         }
                         std::process::exit(1);
                     }
+                }
+            }
+            PurchaseAction::Delete { id } => {
+                let affected = conn.execute("DELETE FROM purchases WHERE id = ?", [id])?;
+                if affected == 0 {
+                    if json {
+                        print_error_json(&format!("purchase not found: {}", id));
+                    } else {
+                        eprintln!("not found");
+                    }
+                    std::process::exit(1);
+                }
+                let msg = format!("Deleted purchase {}", id);
+                if json {
+                    print_success_json(Success::ok(msg.clone()));
+                } else {
+                    quiet_print(&msg, quiet);
                 }
             }
         }
@@ -1553,6 +1601,23 @@ mod commands {
                             format_local(&c.consumed_at.utc)
                         );
                     }
+                }
+            }
+            ConsumptionAction::Delete { id } => {
+                let affected = conn.execute("DELETE FROM consumptions WHERE id = ?", [id])?;
+                if affected == 0 {
+                    if json {
+                        print_error_json(&format!("consumption not found: {}", id));
+                    } else {
+                        eprintln!("not found");
+                    }
+                    std::process::exit(1);
+                }
+                let msg = format!("Deleted consumption {}", id);
+                if json {
+                    print_success_json(Success::ok(msg.clone()));
+                } else {
+                    quiet_print(&msg, quiet);
                 }
             }
         }

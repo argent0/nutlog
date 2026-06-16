@@ -27,6 +27,9 @@ pub enum NutlogError {
     #[error("product {0} has associated purchases; use --force to delete anyway")]
     ProductHasPurchases(i64),
 
+    #[error("nutrient {0} is referenced by product nutrition data; use --force to delete anyway")]
+    NutrientHasReferences(i64),
+
     #[error("invalid price: {0}")]
     InvalidPrice(String),
 

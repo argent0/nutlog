@@ -17,7 +17,7 @@ It is designed primarily to be used by LLM agents on behalf of a single user.
 - Fuzzy search for products, nutrients, tags
 - Flexible date input: `today`, `yesterday`, `2026-05-20`, `last week`, etc.
 - Nutrition scaling for consumption reports
-- Safety on delete (purchases block product delete unless `--force`)
+- Safety on delete (`product` and `nutrient` require `--force` when referenced data exists)
 
 ## Installation (dev)
 
@@ -105,6 +105,8 @@ nutlog --json nutrient list
 nutlog nutrient create "Vitamin D" --unit µg --recommended-intake 15
 nutlog nutrient show 7
 nutlog nutrient search "vit d"
+nutlog nutrient delete 17          # fails if products reference it
+nutlog nutrient delete 17 --force
 ```
 
 Common nutrients (Protein, Carbohydrates, Fat, Fiber, Sugars, Vitamin C, Vitamin D, Calcium, Iron, Potassium) are pre-populated.
@@ -137,6 +139,7 @@ nutlog purchase create 1 \
 nutlog --json purchase list --since 2026-05-01
 nutlog purchase list --product 1
 nutlog purchase show 42
+nutlog purchase delete 42
 ```
 
 ### Stores
@@ -158,6 +161,7 @@ Same pattern as product tags:
 nutlog store-tag create "supermarket"
 nutlog store-tag list
 nutlog store-tag search "super"
+nutlog store-tag delete 1
 ```
 
 ### Consumption
@@ -173,6 +177,7 @@ If `--quantity` / `--unit` omitted, falls back to product's reference quantity (
 
 ```bash
 nutlog --json consumption list --since 2026-05-01
+nutlog consumption delete 5
 ```
 
 ### Reports

@@ -37,6 +37,21 @@ nutlog product delete 5 --force   # also deletes the purchases
 
 Only use `--force` when you truly want to remove history.
 
+### Nutrient delete fails with "referenced by product nutrition data"
+
+This is by design (data integrity).
+
+```bash
+nutlog nutrient delete 17 --force   # also removes product micronutrient rows
+```
+
+Only use `--force` when you accept losing those micronutrient entries on affected products.
+
+### Purchase or consumption delete returns "not found"
+
+- Confirm the ID with `nutlog --json purchase list` or `consumption list`.
+- IDs are not reused after deletion; a stale ID from a previous session will fail.
+
 ### Nutrition report shows 0 or missing values
 
 Possible causes:

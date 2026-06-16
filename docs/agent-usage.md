@@ -77,7 +77,9 @@ The agent can decide to summarize, compare to recommended intakes (the master nu
 ### Cleanup / Maintenance (rare)
 
 - Rename products when brands change formulation or user wants cleaner names.
-- Delete test data with `--force` when necessary.
+- Delete mistaken purchase or consumption records: `purchase delete <id>`, `consumption delete <id>`.
+- Delete test products with `product delete <id> --force` when purchases exist.
+- Remove custom nutrients with `nutrient delete <id>` (or `--force` if referenced in product nutrition).
 - Tag hygiene via `product-tag` / `store-tag` delete (use sparingly).
 
 ## Fuzzy Search Notes
@@ -115,8 +117,9 @@ Agents should prefer the `_cents` fields for any arithmetic.
 
 ## Error Cases Agents Must Handle
 
-- Entity not found (product, store, purchase, etc.)
+- Entity not found (product, store, purchase, consumption, nutrient, etc.)
 - Product has purchases (delete without force)
+- Nutrient referenced by product nutrition (delete without force)
 - Invalid price / invalid date (the exact string the user/agent supplied is echoed)
 - Duplicate nutrient name (on create)
 - DB constraint errors surface as `database error: ...` (rare if you follow the command contract)
@@ -168,7 +171,7 @@ print("Protein today:", report["totals"].get("protein_g"))
 - No unit conversion.
 - No multi-user, no auth, no encryption at rest (the DB is plain SQLite in the user's home).
 - No photos, no inventory levels, no meal planning.
-- No "edit" for nutrition once set (delete + re-set the product or use direct SQL).
+- No "edit" for nutrition once set (re-run `product nutrition set` to replace, or delete the product).
 - Reports do not do daily averages or goal tracking yet.
 
 If you need extra behavior, do it in the agent layer (or propose a minimal, well-scoped extension that follows the existing patterns).

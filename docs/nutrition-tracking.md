@@ -149,7 +149,7 @@ You can add more with `nutlog nutrient create "Vitamin B12" --unit µg --recomme
 
 - `product_nutritions.product_id` has ON DELETE CASCADE.
 - `product_micronutrients` rows are also cascaded when product is deleted.
-- Deleting a nutrient definition will fail if micronutrient rows still reference it (FK restrict).
+- `nutrient delete <id>` fails if any product micronutrient rows reference the nutrient, unless `--force` is used (which cascades those rows).
 
 ## Tips for Accurate Tracking
 

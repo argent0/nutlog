@@ -52,7 +52,7 @@ All mutating actions return a `{ "success": true, "id": N, "message": "..." }` o
 - Fuzzy search uses Jaro-Winkler similarity (simple, no external deps beyond `strsim`).
 - Pre-populated common nutrients on first run.
 - No network, no cloud, no accounts. Local and private.
-- Safety: deleting a product with purchases requires `--force` (cascades purchases).
+- Safety: deleting a product with purchases or a nutrient referenced in product nutrition requires `--force` (cascades dependent rows).
 
 ## Version and Help
 

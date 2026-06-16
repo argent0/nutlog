@@ -212,6 +212,14 @@ pub enum NutrientAction {
     Show { id: i64 },
     /// Fuzzy search nutrients by name.
     Search { query: String },
+    /// Delete a nutrient. Fails if products reference it unless --force.
+    Delete {
+        /// Nutrient ID
+        id: i64,
+        /// Force delete even if product micronutrient rows reference it.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 // ---------- Product Tag ----------
@@ -268,6 +276,8 @@ pub enum PurchaseAction {
     },
     /// Show a single purchase.
     Show { id: i64 },
+    /// Delete a purchase record.
+    Delete { id: i64 },
 }
 
 // ---------- Store ----------
@@ -345,6 +355,8 @@ pub enum ConsumptionAction {
         #[arg(long)]
         product: Option<i64>,
     },
+    /// Delete a consumption record.
+    Delete { id: i64 },
 }
 
 // ---------- Report ----------

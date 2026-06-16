@@ -21,12 +21,12 @@ All commands accept the global flags `--json`, `--db <PATH>`, `--quiet`.
 | Entity         | Purpose                              | Typical Actions                     |
 |----------------|--------------------------------------|-------------------------------------|
 | `product`      | Food items you buy and eat           | create, list, search, show, rename, tag, delete, nutrition |
-| `nutrient`     | Master list of nutrient definitions  | list, create, show, search          |
+| `nutrient`     | Master list of nutrient definitions  | list, create, show, search, delete    |
 | `product-tag`  | Taxonomy for products                | create, list, search, show, delete  |
-| `purchase`     | Purchase events (with price, qty)    | create, list, show                  |
+| `purchase`     | Purchase events (with price, qty)    | create, list, show, delete          |
 | `store`        | Shopping locations                   | create, list, show, rename, tag, delete |
 | `store-tag`    | Taxonomy for stores                  | create, list, search, show, delete  |
-| `consumption`  | Actual eaten amounts + dates         | create, list                        |
+| `consumption`  | Actual eaten amounts + dates         | create, list, delete                |
 | `report`       | Derived summaries                    | nutrition, spending                 |
 
 ## product
@@ -191,6 +191,18 @@ JSON or debug print of the row.
 
 Fuzzy (Jaro-Winkler) search over nutrient names. Returns full objects ranked best-first.
 
+### nutrient delete <ID> [--force]
+
+- Without `--force`: fails (non-zero) if any `product_micronutrients` rows reference the nutrient. Error message suggests `--force`.
+- With `--force`: deletes the nutrient (and its product micronutrient associations via FK cascade).
+- Unreferenced nutrients (including custom ones) delete without `--force`.
+
+**JSON error example** (without force when referenced):
+
+```json
+{ "success": false, "error": "nutrient 17 is referenced by product nutrition data; use --force to delete anyway" }
+```
+
 ## product-tag
 
 Lightweight controlled vocabulary for products.
@@ -230,6 +242,13 @@ Missing price shows as null / "-".
 
 Full single purchase record or "not found".
 
+### purchase delete <ID>
+
+- Unconditional delete by purchase ID.
+- Does not affect the product or store; only removes the purchase row.
+
+**JSON success**: `{ "success": true, "message": "Deleted purchase N" }`
+
 ## store
 
 Simple catalog of locations.
@@ -261,6 +280,13 @@ nutlog consumption create <PRODUCT_ID> [--quantity Q] [--unit U] [--date D]
 ### consumption list [--since] [--until] [--product]
 
 Simple list or JSON array of `Consumption` records (with product_name denormalized).
+
+### consumption delete <ID>
+
+- Unconditional delete by consumption ID.
+- Does not affect the product; only removes the consumption row.
+
+**JSON success**: `{ "success": true, "message": "Deleted consumption N" }`
 
 ## report
 
@@ -329,6 +355,7 @@ Common errors:
 - `product not found: 99`
 - `store not found: 5`
 - `product 7 has associated purchases; use --force to delete anyway`
+- `nutrient 17 is referenced by product nutrition data; use --force to delete anyway`
 - `invalid price: abc`
 - `invalid date: ...`
 - `unrecognized date format: 'foo'`

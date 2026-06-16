@@ -590,3 +590,208 @@ fn product_nutrition_set_replaces_micronutrients() {
     assert!(!s.contains("Omega 3 EPA"));
     assert!(!s.contains("Hyaluronic acid"));
 }
+
+#[test]
+fn purchase_delete_json() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Delete Me Milk");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("purchase")
+        .arg("create")
+        .arg("1")
+        .arg("--date")
+        .arg("today");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("purchase")
+        .arg("delete")
+        .arg("1");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"success\": true"));
+    assert!(s.contains("Deleted purchase 1"));
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("purchase")
+        .arg("list");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(!s.contains("\"id\": 1"));
+}
+
+#[test]
+fn consumption_delete_json() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Snack Bar");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("consumption")
+        .arg("create")
+        .arg("1")
+        .arg("--quantity")
+        .arg("50")
+        .arg("--unit")
+        .arg("g");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("consumption")
+        .arg("delete")
+        .arg("1");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"success\": true"));
+    assert!(s.contains("Deleted consumption 1"));
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("consumption")
+        .arg("list");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(!s.contains("\"id\": 1"));
+}
+
+#[test]
+fn nutrient_delete_unreferenced_json() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("nutrient")
+        .arg("create")
+        .arg("Temp Nutrient X")
+        .arg("--unit")
+        .arg("mg");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"success\": true"));
+    let nutrient_id = s
+        .split("\"id\":")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .unwrap()
+        .trim();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("nutrient")
+        .arg("delete")
+        .arg(nutrient_id);
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"success\": true"));
+    assert!(s.contains("Deleted nutrient"));
+}
+
+#[test]
+fn nutrient_delete_without_force_fails_when_referenced() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Fish Oil");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("nutrient")
+        .arg("create")
+        .arg("Ref Nutrient Y")
+        .arg("--unit")
+        .arg("mg");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    let nutrient_id = s
+        .split("\"id\":")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .unwrap()
+        .trim();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("1")
+        .arg("--reference-unit")
+        .arg("capsule")
+        .arg("--micronutrient")
+        .arg("Ref Nutrient Y")
+        .arg("10")
+        .arg("mg");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("nutrient")
+        .arg("delete")
+        .arg(nutrient_id);
+    let out = cmd.assert().failure().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"success\": false"));
+    assert!(s.contains("referenced by product nutrition data"));
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("nutrient")
+        .arg("delete")
+        .arg(nutrient_id)
+        .arg("--force");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"success\": true"));
+    assert!(s.contains("Deleted nutrient"));
+}
