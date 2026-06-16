@@ -399,6 +399,74 @@ fn nutrition_set_auto_creates_nutrient() {
 }
 
 #[test]
+fn report_nutrition_single_day_range_includes_afternoon_consumption() {
+    use chrono::{Local, TimeZone};
+
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let today = Local::now().date_naive();
+    let date_str = today.format("%Y-%m-%d").to_string();
+    let consumed_at = Local
+        .from_local_datetime(&today.and_hms_opt(14, 30, 0).unwrap())
+        .single()
+        .unwrap()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Lunch Item");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("100")
+        .arg("--reference-unit")
+        .arg("g")
+        .arg("--protein-g")
+        .arg("10");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("consumption")
+        .arg("create")
+        .arg("1")
+        .arg("--quantity")
+        .arg("100")
+        .arg("--unit")
+        .arg("g")
+        .arg("--date")
+        .arg(&consumed_at);
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("report")
+        .arg("nutrition")
+        .arg("--since")
+        .arg(&date_str)
+        .arg("--until")
+        .arg(&date_str);
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"total_consumed_items\": 1"));
+    assert!(s.contains("\"protein_g\": 10.0"));
+}
+
+#[test]
 fn report_nutrition_scales_micronutrients() {
     let dir = tempdir().unwrap();
     let db = dir.path().join("test.db");

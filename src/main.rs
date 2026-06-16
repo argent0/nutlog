@@ -59,7 +59,9 @@ fn run() -> Result<()> {
 mod commands {
     use super::*;
     use crate::cli::*;
-    use crate::db::{format_local, now_utc, parse_flexible_date};
+    use crate::db::{
+        format_local, now_utc, parse_flexible_date, parse_flexible_date_bound, DateBound,
+    };
     use crate::error::{NutlogError, Result as NutResult};
     use crate::models::*;
     use comfy_table::{presets, Cell, Table};
@@ -1015,7 +1017,7 @@ mod commands {
                     idx += 1;
                 }
                 if let Some(ref ud) = until {
-                    let dt = parse_flexible_date(ud)
+                    let dt = parse_flexible_date_bound(ud, DateBound::End)
                         .map_err(|e| NutlogError::InvalidDate(e.to_string()))?
                         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                     sql.push_str(&format!(" AND pu.purchased_at <= ?{} ", idx));
@@ -1508,7 +1510,7 @@ mod commands {
                     i += 1;
                 }
                 if let Some(ud) = until {
-                    let dt = parse_flexible_date(&ud)
+                    let dt = parse_flexible_date_bound(&ud, DateBound::End)
                         .map_err(|e| NutlogError::InvalidDate(e.to_string()))?
                         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                     sql.push_str(&format!(" AND c.consumed_at <= ?{} ", i));
@@ -1584,8 +1586,8 @@ mod commands {
                     i += 1;
                 }
                 if let Some(ref ud) = until {
-                    let d =
-                        parse_flexible_date(ud)?.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                    let d = parse_flexible_date_bound(ud, DateBound::End)?
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                     sql.push_str(&format!(" AND c.consumed_at <= ?{} ", i));
                     pvec.push(Box::new(d));
                 }
@@ -1725,8 +1727,8 @@ mod commands {
                     i += 1;
                 }
                 if let Some(ud) = &until {
-                    let d =
-                        parse_flexible_date(ud)?.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                    let d = parse_flexible_date_bound(ud, DateBound::End)?
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                     base_sql.push_str(&format!(" AND pu.purchased_at <= ?{} ", i));
                     pvec.push(Box::new(d));
                 }
@@ -1752,7 +1754,7 @@ mod commands {
                         i += 1;
                     }
                     if let Some(ud) = &until {
-                        let d = parse_flexible_date(ud)?
+                        let d = parse_flexible_date_bound(ud, DateBound::End)?
                             .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                         ssql.push_str(&format!(" AND pu.purchased_at <= ?{} ", i));
                         spvec.push(Box::new(d));
@@ -1791,7 +1793,7 @@ mod commands {
                         i += 1;
                     }
                     if let Some(ud) = &until {
-                        let d = parse_flexible_date(ud)?
+                        let d = parse_flexible_date_bound(ud, DateBound::End)?
                             .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                         psql.push_str(&format!(" AND pu.purchased_at<=?{} ", i));
                         ppvec.push(Box::new(d));

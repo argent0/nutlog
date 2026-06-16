@@ -194,16 +194,32 @@ pub fn now_utc() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-/// Parse a flexible date string into UTC datetime at midnight-ish for date purposes.
+/// Whether a flexible date string should resolve to the start or end of a local calendar day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateBound {
+    /// Start of the local calendar day (00:00:00).
+    Start,
+    /// End of the local calendar day (23:59:59).
+    End,
+}
+
+/// Parse a flexible date string into UTC datetime at the start of the local calendar day.
 /// Supports: today, yesterday, YYYY-MM-DD, and simple relatives.
-/// Returns the UTC instant corresponding to start of day in local? For storage we store the date as provided in UTC context?
-/// Per spec: stored in UTC. For input "today" means current local? But to simplify, treat natural as local day start converted to UTC?
-/// For simplicity in v1: parse to NaiveDate, then assume UTC midnight for that date.
-/// Better: use local for "today" etc, convert the intended wall time to UTC for storage? But dates for logs are "the day".
-/// Decision: for purchase/consumption dates, we store the instant, but for --date we interpret "today" etc relative to local time, store as UTC of that local midnight?
-/// To keep practical: parse to a UTC DateTime representing the start of the logical day.
+/// Explicit RFC3339 timestamps are returned verbatim.
 pub fn parse_flexible_date(s: &str) -> Result<DateTime<Utc>> {
-    let s = s.trim().to_lowercase();
+    parse_flexible_date_bound(s, DateBound::Start)
+}
+
+/// Parse a flexible date string for inclusive range filtering.
+/// Date-only inputs resolve to local start-of-day (`Start`) or end-of-day (`End`).
+/// Explicit RFC3339 timestamps are returned verbatim.
+pub fn parse_flexible_date_bound(s: &str, bound: DateBound) -> Result<DateTime<Utc>> {
+    let trimmed = s.trim();
+    if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+
+    let s = trimmed.to_lowercase();
     let now = chrono::Local::now();
     let today = now.date_naive();
 
@@ -230,31 +246,54 @@ pub fn parse_flexible_date(s: &str) -> Result<DateTime<Utc>> {
         today - chrono::Duration::days(7)
     } else if s == "last month" {
         today - chrono::Duration::days(30)
+    } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&s, "%m-%d-%Y") {
+        d
+    } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&s, "%d-%m-%Y") {
+        d
     } else {
-        // try other formats
-        if let Ok(dt) = DateTime::parse_from_rfc3339(&s) {
-            return Ok(dt.with_timezone(&Utc));
-        }
-        if let Ok(d) = chrono::NaiveDate::parse_from_str(&s, "%m-%d-%Y") {
-            d
-        } else if let Ok(d) = chrono::NaiveDate::parse_from_str(&s, "%d-%m-%Y") {
-            d
-        } else {
-            return Err(anyhow!(
-                "unrecognized date format: '{}'. Use today, yesterday, 2026-05-20, etc.",
-                s
-            ));
-        }
+        return Err(anyhow!(
+            "unrecognized date format: '{}'. Use today, yesterday, 2026-05-20, etc.",
+            s
+        ));
     };
 
-    // Treat the date as local midnight, convert to UTC.
+    let (hour, min, sec) = match bound {
+        DateBound::Start => (0, 0, 0),
+        DateBound::End => (23, 59, 59),
+    };
+
     let local_dt = naive
-        .and_hms_opt(0, 0, 0)
+        .and_hms_opt(hour, min, sec)
         .ok_or_else(|| anyhow!("invalid date"))?
         .and_local_timezone(chrono::Local)
         .single()
         .ok_or_else(|| anyhow!("ambiguous local time for date"))?;
     Ok(local_dt.with_timezone(&Utc))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Timelike;
+
+    #[test]
+    fn date_bound_end_is_after_start_for_same_day() {
+        let start = parse_flexible_date_bound("2026-06-16", DateBound::Start).unwrap();
+        let end = parse_flexible_date_bound("2026-06-16", DateBound::End).unwrap();
+        assert!(end > start);
+        let local_end = end.with_timezone(&chrono::Local);
+        assert_eq!(local_end.hour(), 23);
+        assert_eq!(local_end.minute(), 59);
+        assert_eq!(local_end.second(), 59);
+    }
+
+    #[test]
+    fn explicit_rfc3339_ignores_bound() {
+        let ts = "2026-06-16T13:45:00-03:00";
+        let start = parse_flexible_date_bound(ts, DateBound::Start).unwrap();
+        let end = parse_flexible_date_bound(ts, DateBound::End).unwrap();
+        assert_eq!(start, end);
+    }
 }
 
 /// Format a stored UTC timestamp for human output in local zone.
