@@ -55,6 +55,34 @@ fn product_create_and_list_json() {
 }
 
 #[test]
+fn product_search_substring_not_fuzzy_noise() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    for name in ["Cappuccino (whole milk, no sugar)", "Milanesa de Ternera"] {
+        let mut cmd = nutlog_cmd();
+        cmd.arg("--db")
+            .arg(&db)
+            .arg("product")
+            .arg("create")
+            .arg(name);
+        cmd.assert().success();
+    }
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("search")
+        .arg("--name")
+        .arg("milk");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("Cappuccino"));
+    assert!(!s.contains("Milanesa"));
+}
+
+#[test]
 fn product_search_by_name_json() {
     let dir = tempdir().unwrap();
     let db = dir.path().join("test.db");

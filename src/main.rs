@@ -201,14 +201,88 @@ mod commands {
         }
     }
 
+    fn tokenize(s: &str) -> Vec<String> {
+        s.to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    /// Score how well a single name token matches a single query token.
+    fn word_match_score(word: &str, query_word: &str) -> f64 {
+        if word == query_word {
+            return 1.0;
+        }
+        if word.starts_with(query_word) {
+            return 0.9;
+        }
+        if query_word.starts_with(word) && word.len() >= 2 {
+            return 0.85;
+        }
+        if query_word.len() >= 2 && word.contains(query_word) {
+            return 0.8;
+        }
+        let len_ratio = word.len() as f64 / query_word.len() as f64;
+        if (0.5..=2.0).contains(&len_ratio) {
+            let jw = jaro_winkler(word, query_word);
+            if jw >= 0.85 {
+                return jw;
+            }
+        }
+        0.0
+    }
+
+    /// Score how well `name` matches `query` using token-aware matching.
+    ///
+    /// Full-string Jaro-Winkler is poor for short queries against long product names
+    /// (e.g. "milk" ranking "Milanesa" above "whole milk"). We match per-token instead.
+    fn name_match_score(name: &str, query: &str) -> f64 {
+        let name_lower = name.to_lowercase();
+        let query_lower = query.to_lowercase();
+
+        if name_lower == query_lower {
+            return 1.0;
+        }
+        if name_lower.contains(&query_lower) {
+            return 0.95;
+        }
+
+        let name_words = tokenize(name);
+        let query_words = tokenize(query);
+        if query_words.is_empty() {
+            return 0.0;
+        }
+
+        let mut total = 0.0;
+        let mut matched = 0u32;
+        for qw in &query_words {
+            let best = name_words
+                .iter()
+                .map(|w| word_match_score(w, qw))
+                .fold(0.0f64, f64::max);
+            if best > 0.0 {
+                matched += 1;
+                total += best;
+            }
+        }
+
+        if matched != query_words.len() as u32 {
+            return 0.0;
+        }
+
+        total / query_words.len() as f64
+    }
+
     fn fuzzy_rank(items: Vec<(i64, String)>, query: &str) -> Vec<(i64, String, f64)> {
-        let q = query.to_lowercase();
+        const MIN_SCORE: f64 = 0.5;
         let mut scored: Vec<_> = items
             .into_iter()
             .map(|(id, name)| {
-                let score = jaro_winkler(&name.to_lowercase(), &q);
+                let score = name_match_score(&name, query);
                 (id, name, score)
             })
+            .filter(|(_, _, score)| *score >= MIN_SCORE)
             .collect();
         scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
         scored
@@ -1917,5 +1991,44 @@ mod commands {
             }
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod search_tests {
+        use super::{fuzzy_rank, name_match_score};
+
+        #[test]
+        fn substring_beats_fuzzy_false_positive() {
+            let milk_score = name_match_score("Cappuccino (whole milk, no sugar)", "milk");
+            let milanesa_score = name_match_score("Milanesa de Ternera Ofe", "milk");
+            assert!(milk_score > milanesa_score);
+            assert!(milk_score >= 0.9);
+            assert_eq!(milanesa_score, 0.0);
+        }
+
+        #[test]
+        fn prefix_match_for_short_query() {
+            assert!(name_match_score("Banana Bunch", "ban") >= 0.85);
+        }
+
+        #[test]
+        fn multi_word_query_matches_vitamin_d() {
+            let score = name_match_score("Vitamin D", "vit d");
+            assert!(score >= 0.8);
+            assert_eq!(name_match_score("Vitamin B6", "vit d"), 0.0);
+            assert_eq!(name_match_score("Pantothenic acid (Vitamin B5)", "vit d"), 0.0);
+        }
+
+        #[test]
+        fn fuzzy_rank_filters_irrelevant_products() {
+            let items = vec![
+                (37, "Milanesa de Ternera Ofe".into()),
+                (15, "Cappuccino (whole milk, no sugar)".into()),
+                (1, "Pomelo".into()),
+            ];
+            let ranked = fuzzy_rank(items, "milk");
+            assert_eq!(ranked.len(), 1);
+            assert_eq!(ranked[0].0, 15);
+        }
     }
 }
