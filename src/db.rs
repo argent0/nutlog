@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use directories::ProjectDirs;
 use rusqlite::{Connection, OptionalExtension};
 use std::path::PathBuf;
@@ -269,6 +269,81 @@ pub fn parse_flexible_date_bound(s: &str, bound: DateBound) -> Result<DateTime<U
         .single()
         .ok_or_else(|| anyhow!("ambiguous local time for date"))?;
     Ok(local_dt.with_timezone(&Utc))
+}
+
+/// Resolved date range for nutrition reports.
+#[derive(Debug, Clone)]
+pub struct ResolvedNutritionPeriod {
+    pub since_label: Option<String>,
+    pub until_label: Option<String>,
+    pub days: Option<u32>,
+    pub since_utc: Option<DateTime<Utc>>,
+    pub until_utc: Option<DateTime<Utc>>,
+    /// Inclusive local calendar dates for zero-filling daily list entries.
+    pub fill_range: Option<(NaiveDate, NaiveDate)>,
+}
+
+/// Resolve nutrition report period from --days and/or --since/--until flags.
+pub fn resolve_nutrition_period(
+    since: Option<&str>,
+    until: Option<&str>,
+    days: Option<u32>,
+) -> Result<ResolvedNutritionPeriod> {
+    let today = chrono::Local::now().date_naive();
+
+    if let Some(n) = days {
+        let since_date = today - chrono::Duration::days(i64::from(n) - 1);
+        let since_str = since_date.format("%Y-%m-%d").to_string();
+        let until_str = today.format("%Y-%m-%d").to_string();
+        return Ok(ResolvedNutritionPeriod {
+            since_label: Some(since_str.clone()),
+            until_label: Some(until_str.clone()),
+            days: Some(n),
+            since_utc: Some(parse_flexible_date(&since_str)?),
+            until_utc: Some(parse_flexible_date_bound(&until_str, DateBound::End)?),
+            fill_range: Some((since_date, today)),
+        });
+    }
+
+    let since_utc = since.map(parse_flexible_date).transpose()?;
+    let until_utc = until
+        .map(|u| parse_flexible_date_bound(u, DateBound::End))
+        .transpose()?;
+
+    let fill_range = match (since, until) {
+        (Some(s), Some(u)) => {
+            let sd = parse_flexible_date(s)?
+                .with_timezone(&chrono::Local)
+                .date_naive();
+            let ud = parse_flexible_date_bound(u, DateBound::End)?
+                .with_timezone(&chrono::Local)
+                .date_naive();
+            Some((sd, ud))
+        }
+        (Some(s), None) => {
+            let sd = parse_flexible_date(s)?
+                .with_timezone(&chrono::Local)
+                .date_naive();
+            Some((sd, today))
+        }
+        (None, Some(_)) | (None, None) => None,
+    };
+
+    Ok(ResolvedNutritionPeriod {
+        since_label: since.map(str::to_owned),
+        until_label: until.map(str::to_owned),
+        days: None,
+        since_utc,
+        until_utc,
+        fill_range,
+    })
+}
+
+/// Convert a stored RFC3339 timestamp to the local calendar date.
+pub fn local_date_from_rfc3339(s: &str) -> Result<NaiveDate> {
+    let dt =
+        DateTime::parse_from_rfc3339(s).map_err(|e| anyhow!("invalid timestamp '{}': {}", s, e))?;
+    Ok(dt.with_timezone(&chrono::Local).date_naive())
 }
 
 #[cfg(test)]

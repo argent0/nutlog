@@ -8,19 +8,30 @@ Use `--json` to get complete, machine-readable structures suitable for further p
 
 ## report nutrition
 
+Nutrition reports have two subcommands: `summary` (period totals) and `list` (per-day breakdown).
+
+Shared date flags (both subcommands):
+
+- `--since DATE` — start of period (inclusive)
+- `--until DATE` — end of period (inclusive)
+- `--days N` — last N calendar days inclusive of today (cannot be combined with `--since`/`--until`)
+
+### report nutrition summary
+
 ```bash
-nutlog report nutrition [--since DATE] [--until DATE]
-nutlog --json report nutrition --since "2026-05-01" --until "2026-05-31"
+nutlog report nutrition summary [--since DATE] [--until DATE] [--days N]
+nutlog --json report nutrition summary --since "2026-05-01" --until "2026-05-31"
+nutlog --json report nutrition summary --days 7
 ```
 
-### What it calculates
+#### What it calculates
 
 - Finds every consumption record whose `consumed_at` is inside the window (inclusive on both ends when provided).
 - For each such record that has a matching row in `product_nutritions`, scales the stored nutrition facts by `consumed_qty / ref_qty`.
 - Sums the scaled values across all qualifying consumptions.
 - Also scales and sums any micronutrients attached to those products.
 
-### Output
+#### Output
 
 Human mode prints a short summary (main macros + up to 5 micros).
 
@@ -30,7 +41,8 @@ JSON mode returns a `NutritionReport`:
 {
   "period": {
     "since": "2026-05-01",
-    "until": "2026-05-31"
+    "until": "2026-05-31",
+    "days": null
   },
   "total_consumed_items": 7,
   "totals": {
@@ -56,11 +68,64 @@ JSON mode returns a `NutritionReport`:
 - Any macro or micro that had no data across the period will be absent or null in the `totals` object (see serde skip rules).
 - Micronutrients array is always present (may be empty).
 
-### Filtering behavior
+#### Filtering behavior
 
 - No `--since` → from the beginning of time.
 - No `--until` → up to now.
 - Both omitted → all consumption that has nutrition attached.
+- `--days N` → overrides `--since`/`--until` with a rolling window ending today.
+
+### report nutrition list
+
+```bash
+nutlog report nutrition list [--since DATE] [--until DATE] [--days N] [--value VALUE]
+nutlog --json report nutrition list --days 7 --value protein
+nutlog report nutrition list --value macronutrients --since 2026-05-01 --until 2026-05-31
+```
+
+#### `--value` options
+
+| Value | Shows per day |
+|-------|---------------|
+| `macronutrients` (default) | energy, protein, carbohydrates, fat, fiber, sugars |
+| `calories` | energy (kcal) only |
+| `protein` | protein (g) only |
+| `carbohydrates` | carbohydrates (g) only |
+| `fat` | fat (g) only |
+| `fiber` | fiber (g) only |
+| `sugars` | sugars (g) only |
+
+Micronutrients are not included in `list` output.
+
+#### Output
+
+JSON mode returns a `NutritionDailyReport`:
+
+```json
+{
+  "period": {
+    "since": "2026-06-28",
+    "until": "2026-07-04",
+    "days": 7
+  },
+  "value": "protein",
+  "days": [
+    {
+      "date": "2026-06-28",
+      "total_consumed_items": 2,
+      "totals": { "protein_g": 45.0 }
+    },
+    {
+      "date": "2026-06-29",
+      "total_consumed_items": 0,
+      "totals": {}
+    }
+  ]
+}
+```
+
+- When the period is bounded (`--days`, both `--since` and `--until`, or `--since` only), every calendar day in the range is included with zero-filled totals for days without consumption.
+- When no date filter is given, only days that have consumption are listed (sparse mode).
 
 Dates are interpreted with the same rules as everywhere else (see [data-model](data-model.md)).
 
@@ -145,7 +210,7 @@ Always request `--json`.
 Typical agent flow:
 
 1. Decide on a period (e.g. last 7 days, this month).
-2. Call `report nutrition --json --since ...`
+2. Call `report nutrition summary --json --since ...` or `report nutrition list --json --days 7 --value protein`
 3. Parse the `totals` and decide whether to log more consumption or surface a summary to the user.
 4. Optionally call spending report for budgeting context.
 
@@ -169,7 +234,7 @@ Currently there is no `--product` filter directly on the spending report (you ge
 ## Future Directions (Not Yet Implemented)
 
 - More grouping modes for spending (`--by month`, `--period month`)
-- Average daily / weekly intake from nutrition report
+- Weekly/monthly rollups beyond daily list
 - Export of reports to CSV / other formats
 - Budget targets vs actual (would live outside core reports)
 

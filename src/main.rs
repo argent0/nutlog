@@ -60,13 +60,14 @@ mod commands {
     use super::*;
     use crate::cli::*;
     use crate::db::{
-        format_local, now_utc, parse_flexible_date, parse_flexible_date_bound, DateBound,
+        format_local, local_date_from_rfc3339, now_utc, parse_flexible_date,
+        parse_flexible_date_bound, resolve_nutrition_period, DateBound, ResolvedNutritionPeriod,
     };
     use crate::error::{NutlogError, Result as NutResult};
     use crate::models::*;
     use comfy_table::{presets, Cell, Table};
     use rusqlite::{params, OptionalExtension, Row};
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use strsim::jaro_winkler;
 
     // ---------- helpers ----------
@@ -1700,6 +1701,318 @@ mod commands {
 
     // ---------- REPORT ----------
 
+    struct NutritionConsumptionRow {
+        consumed_at: String,
+        product_id: i64,
+        scale: f64,
+        energy_kcal: Option<f64>,
+        protein_g: Option<f64>,
+        carbohydrates_g: Option<f64>,
+        fat_g: Option<f64>,
+        fiber_g: Option<f64>,
+        sugars_g: Option<f64>,
+    }
+
+    fn period_from_resolved(resolved: &ResolvedNutritionPeriod) -> Period {
+        Period {
+            since: resolved.since_label.clone(),
+            until: resolved.until_label.clone(),
+            days: resolved.days,
+        }
+    }
+
+    fn add_row_macros(totals: &mut MacroTotals, row: &NutritionConsumptionRow) {
+        let scale = row.scale;
+        if let Some(v) = row.energy_kcal {
+            totals.energy_kcal = Some(totals.energy_kcal.unwrap_or(0.0) + v * scale);
+        }
+        if let Some(v) = row.protein_g {
+            totals.protein_g = Some(totals.protein_g.unwrap_or(0.0) + v * scale);
+        }
+        if let Some(v) = row.carbohydrates_g {
+            totals.carbohydrates_g = Some(totals.carbohydrates_g.unwrap_or(0.0) + v * scale);
+        }
+        if let Some(v) = row.fat_g {
+            totals.fat_g = Some(totals.fat_g.unwrap_or(0.0) + v * scale);
+        }
+        if let Some(v) = row.fiber_g {
+            totals.fiber_g = Some(totals.fiber_g.unwrap_or(0.0) + v * scale);
+        }
+        if let Some(v) = row.sugars_g {
+            totals.sugars_g = Some(totals.sugars_g.unwrap_or(0.0) + v * scale);
+        }
+    }
+
+    fn fetch_nutrition_consumptions(
+        conn: &Connection,
+        resolved: &ResolvedNutritionPeriod,
+    ) -> Result<Vec<NutritionConsumptionRow>> {
+        let mut sql = "SELECT c.quantity, c.unit, pn.reference_quantity, pn.reference_unit,
+                              pn.energy_kcal, pn.protein_g, pn.carbohydrates_g, pn.fat_g, pn.fiber_g, pn.sugars_g,
+                              c.product_id, c.consumed_at
+                       FROM consumptions c
+                       JOIN product_nutritions pn ON pn.product_id = c.product_id
+                       WHERE 1=1 "
+            .to_string();
+        let mut pvec: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+        let mut i = 1;
+        if let Some(ref sd) = resolved.since_utc {
+            let d = sd.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            sql.push_str(&format!(" AND c.consumed_at >= ?{} ", i));
+            pvec.push(Box::new(d));
+            i += 1;
+        }
+        if let Some(ref ud) = resolved.until_utc {
+            let d = ud.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            sql.push_str(&format!(" AND c.consumed_at <= ?{} ", i));
+            pvec.push(Box::new(d));
+        }
+        let mut stmt = conn.prepare(&sql)?;
+        let refs: Vec<&dyn rusqlite::ToSql> = pvec.iter().map(|b| b.as_ref()).collect();
+        let mut rows = vec![];
+        for row in stmt.query_map(refs.as_slice(), |r| {
+            let cons_qty: f64 = r.get(0)?;
+            let ref_qty: f64 = r.get(2)?;
+            let scale = if ref_qty > 0.0 {
+                cons_qty / ref_qty
+            } else {
+                0.0
+            };
+            Ok(NutritionConsumptionRow {
+                scale,
+                energy_kcal: r.get(4)?,
+                protein_g: r.get(5)?,
+                carbohydrates_g: r.get(6)?,
+                fat_g: r.get(7)?,
+                fiber_g: r.get(8)?,
+                sugars_g: r.get(9)?,
+                product_id: r.get(10)?,
+                consumed_at: r.get(11)?,
+            })
+        })? {
+            rows.push(row?);
+        }
+        Ok(rows)
+    }
+
+    fn aggregate_micronutrients(
+        conn: &Connection,
+        rows: &[NutritionConsumptionRow],
+    ) -> Result<Vec<MicroTotal>> {
+        let mut micro_map: HashMap<i64, (String, String, f64)> = HashMap::new();
+        for row in rows {
+            let mut mstmt = conn.prepare(
+                "SELECT pm.nutrient_id, pm.amount, pm.unit, n.name
+                 FROM product_micronutrients pm
+                 JOIN nutrients n ON n.id = pm.nutrient_id
+                 WHERE pm.product_id = ?",
+            )?;
+            for mr in mstmt.query_map([row.product_id], |mr| {
+                Ok((
+                    mr.get::<_, i64>(0)?,
+                    mr.get::<_, f64>(1)? * row.scale,
+                    mr.get::<_, String>(2)?,
+                    mr.get::<_, String>(3)?,
+                ))
+            })? {
+                let (nid, amt, unit, nm) = mr?;
+                let entry = micro_map.entry(nid).or_insert((nm, unit, 0.0));
+                entry.2 += amt;
+            }
+        }
+        Ok(micro_map
+            .into_iter()
+            .map(|(nid, (nm, un, tot))| MicroTotal {
+                nutrient_id: nid,
+                name: nm,
+                unit: un,
+                total_amount: tot,
+            })
+            .collect())
+    }
+
+    fn apply_value_filter(totals: MacroTotals, value: NutritionReportValue) -> MacroTotals {
+        match value {
+            NutritionReportValue::Macronutrients => totals,
+            NutritionReportValue::Calories => MacroTotals {
+                energy_kcal: totals.energy_kcal,
+                ..Default::default()
+            },
+            NutritionReportValue::Protein => MacroTotals {
+                protein_g: totals.protein_g,
+                ..Default::default()
+            },
+            NutritionReportValue::Carbohydrates => MacroTotals {
+                carbohydrates_g: totals.carbohydrates_g,
+                ..Default::default()
+            },
+            NutritionReportValue::Fat => MacroTotals {
+                fat_g: totals.fat_g,
+                ..Default::default()
+            },
+            NutritionReportValue::Fiber => MacroTotals {
+                fiber_g: totals.fiber_g,
+                ..Default::default()
+            },
+            NutritionReportValue::Sugars => MacroTotals {
+                sugars_g: totals.sugars_g,
+                ..Default::default()
+            },
+        }
+    }
+
+    fn print_macro_totals_human(totals: &MacroTotals, indent: &str) {
+        if let Some(v) = totals.energy_kcal {
+            println!("{indent}energy: {v:.1} kcal");
+        }
+        if let Some(v) = totals.protein_g {
+            println!("{indent}protein: {v:.1} g");
+        }
+        if let Some(v) = totals.carbohydrates_g {
+            println!("{indent}carbohydrates: {v:.1} g");
+        }
+        if let Some(v) = totals.fat_g {
+            println!("{indent}fat: {v:.1} g");
+        }
+        if let Some(v) = totals.fiber_g {
+            println!("{indent}fiber: {v:.1} g");
+        }
+        if let Some(v) = totals.sugars_g {
+            println!("{indent}sugars: {v:.1} g");
+        }
+    }
+
+    fn format_single_macro_value(totals: &MacroTotals, value: NutritionReportValue) -> String {
+        match value {
+            NutritionReportValue::Calories => {
+                format!("{:.1} kcal", totals.energy_kcal.unwrap_or(0.0))
+            }
+            NutritionReportValue::Protein => format!("{:.1} g", totals.protein_g.unwrap_or(0.0)),
+            NutritionReportValue::Carbohydrates => {
+                format!("{:.1} g", totals.carbohydrates_g.unwrap_or(0.0))
+            }
+            NutritionReportValue::Fat => format!("{:.1} g", totals.fat_g.unwrap_or(0.0)),
+            NutritionReportValue::Fiber => format!("{:.1} g", totals.fiber_g.unwrap_or(0.0)),
+            NutritionReportValue::Sugars => format!("{:.1} g", totals.sugars_g.unwrap_or(0.0)),
+            NutritionReportValue::Macronutrients => String::new(),
+        }
+    }
+
+    fn build_daily_entries(
+        rows: &[NutritionConsumptionRow],
+        fill_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
+        value: NutritionReportValue,
+    ) -> Result<Vec<DailyNutritionEntry>> {
+        let mut buckets: BTreeMap<chrono::NaiveDate, (MacroTotals, i64)> = BTreeMap::new();
+        for row in rows {
+            let day = local_date_from_rfc3339(&row.consumed_at)?;
+            let entry = buckets.entry(day).or_default();
+            add_row_macros(&mut entry.0, row);
+            entry.1 += 1;
+        }
+
+        let dates: Vec<chrono::NaiveDate> = if let Some((start, end)) = fill_range {
+            let mut d = start;
+            let mut out = vec![];
+            while d <= end {
+                out.push(d);
+                d += chrono::Duration::days(1);
+            }
+            out
+        } else {
+            buckets.keys().copied().collect()
+        };
+
+        Ok(dates
+            .into_iter()
+            .map(|d| {
+                let (totals, count) = buckets.remove(&d).unwrap_or_default();
+                DailyNutritionEntry {
+                    date: d.format("%Y-%m-%d").to_string(),
+                    total_consumed_items: count,
+                    totals: apply_value_filter(totals, value),
+                }
+            })
+            .collect())
+    }
+
+    fn nutrition_summary(
+        conn: &Connection,
+        period: &NutritionPeriodArgs,
+        json: bool,
+    ) -> Result<()> {
+        let resolved = resolve_nutrition_period(
+            period.since.as_deref(),
+            period.until.as_deref(),
+            period.days,
+        )?;
+        let rows = fetch_nutrition_consumptions(conn, &resolved)?;
+        let mut totals = MacroTotals::default();
+        for row in &rows {
+            add_row_macros(&mut totals, row);
+        }
+        let count = rows.len() as i64;
+        let micros = aggregate_micronutrients(conn, &rows)?;
+
+        let report = NutritionReport {
+            period: period_from_resolved(&resolved),
+            total_consumed_items: count,
+            totals,
+            micronutrients: micros,
+        };
+
+        if json {
+            print_json(&report);
+        } else {
+            println!("Nutrition report ({} items)", count);
+            print_macro_totals_human(&report.totals, "  ");
+            if !report.micronutrients.is_empty() {
+                println!("  key micros:");
+                for m in report.micronutrients.iter().take(5) {
+                    println!("    {}: {:.2} {}", m.name, m.total_amount, m.unit);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn nutrition_list(conn: &Connection, args: &NutritionListArgs, json: bool) -> Result<()> {
+        let resolved = resolve_nutrition_period(
+            args.period.since.as_deref(),
+            args.period.until.as_deref(),
+            args.period.days,
+        )?;
+        let rows = fetch_nutrition_consumptions(conn, &resolved)?;
+        let days = build_daily_entries(&rows, resolved.fill_range, args.value)?;
+        let report = NutritionDailyReport {
+            period: period_from_resolved(&resolved),
+            value: args.value.label().to_string(),
+            days,
+        };
+
+        if json {
+            print_json(&report);
+        } else if args.value == NutritionReportValue::Macronutrients {
+            println!("Nutrition by day ({})", report.value);
+            for day in &report.days {
+                println!("  {} ({} items)", day.date, day.total_consumed_items);
+                print_macro_totals_human(&day.totals, "    ");
+            }
+        } else {
+            println!("Nutrition by day ({})", report.value);
+            println!("  {:<12} {:<12} ITEMS", "DATE", "VALUE");
+            for day in &report.days {
+                println!(
+                    "  {:<12} {:<12} {}",
+                    day.date,
+                    format_single_macro_value(&day.totals, args.value),
+                    day.total_consumed_items
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn handle_report(
         conn: &Connection,
         action: ReportAction,
@@ -1707,146 +2020,10 @@ mod commands {
         _quiet: bool,
     ) -> Result<()> {
         match action {
-            ReportAction::Nutrition { since, until } => {
-                // Collect consumptions in range, join to product nutrition, scale by (consumed_qty / ref_qty)
-                let mut sql = "SELECT c.quantity, c.unit, pn.reference_quantity, pn.reference_unit,
-                                      pn.energy_kcal, pn.protein_g, pn.carbohydrates_g, pn.fat_g, pn.fiber_g, pn.sugars_g,
-                                      c.product_id
-                               FROM consumptions c
-                               JOIN product_nutritions pn ON pn.product_id = c.product_id
-                               WHERE 1=1 ".to_string();
-                let mut pvec: Vec<Box<dyn rusqlite::ToSql>> = vec![];
-                let mut i = 1;
-                if let Some(ref sd) = since {
-                    let d =
-                        parse_flexible_date(sd)?.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                    sql.push_str(&format!(" AND c.consumed_at >= ?{} ", i));
-                    pvec.push(Box::new(d));
-                    i += 1;
-                }
-                if let Some(ref ud) = until {
-                    let d = parse_flexible_date_bound(ud, DateBound::End)?
-                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                    sql.push_str(&format!(" AND c.consumed_at <= ?{} ", i));
-                    pvec.push(Box::new(d));
-                }
-                let mut stmt = conn.prepare(&sql)?;
-                let refs: Vec<&dyn rusqlite::ToSql> = pvec.iter().map(|b| b.as_ref()).collect();
-
-                let mut totals = MacroTotals::default();
-                let mut micro_map: HashMap<i64, (String, String, f64)> = HashMap::new(); // nid -> (name,unit,total)
-                let mut count: i64 = 0;
-
-                for row in stmt.query_map(refs.as_slice(), |r| {
-                    let cons_qty: f64 = r.get(0)?;
-                    let _cons_unit: Option<String> = r.get(1)?;
-                    let ref_qty: f64 = r.get(2)?;
-                    let _ref_unit: String = r.get(3)?;
-                    // scale factor. Note: unit conversion not implemented (assume same base unit)
-                    let scale = if ref_qty > 0.0 {
-                        cons_qty / ref_qty
-                    } else {
-                        0.0
-                    };
-                    Ok((
-                        scale,
-                        r.get::<_, Option<f64>>(4)?, // e
-                        r.get::<_, Option<f64>>(5)?,
-                        r.get::<_, Option<f64>>(6)?,
-                        r.get::<_, Option<f64>>(7)?,
-                        r.get::<_, Option<f64>>(8)?,
-                        r.get::<_, Option<f64>>(9)?,
-                        r.get::<_, i64>(10)?, // pid
-                    ))
-                })? {
-                    let (scale, e, p, c, f, fi, su, pid) = row?;
-                    count += 1;
-                    if let Some(v) = e {
-                        totals.energy_kcal = Some(totals.energy_kcal.unwrap_or(0.0) + v * scale);
-                    }
-                    if let Some(v) = p {
-                        totals.protein_g = Some(totals.protein_g.unwrap_or(0.0) + v * scale);
-                    }
-                    if let Some(v) = c {
-                        totals.carbohydrates_g =
-                            Some(totals.carbohydrates_g.unwrap_or(0.0) + v * scale);
-                    }
-                    if let Some(v) = f {
-                        totals.fat_g = Some(totals.fat_g.unwrap_or(0.0) + v * scale);
-                    }
-                    if let Some(v) = fi {
-                        totals.fiber_g = Some(totals.fiber_g.unwrap_or(0.0) + v * scale);
-                    }
-                    if let Some(v) = su {
-                        totals.sugars_g = Some(totals.sugars_g.unwrap_or(0.0) + v * scale);
-                    }
-
-                    // micros for this product
-                    let mut mstmt = conn.prepare("SELECT pm.nutrient_id, pm.amount, pm.unit, n.name FROM product_micronutrients pm JOIN nutrients n ON n.id=pm.nutrient_id WHERE pm.product_id = ?")?;
-                    for mr in mstmt.query_map([pid], |mr| {
-                        Ok((
-                            mr.get::<_, i64>(0)?,
-                            mr.get::<_, f64>(1)? * scale,
-                            mr.get::<_, String>(2)?,
-                            mr.get::<_, String>(3)?,
-                        ))
-                    })? {
-                        let (nid, amt, unit, nm) = mr?;
-                        let entry = micro_map.entry(nid).or_insert((nm, unit, 0.0));
-                        entry.2 += amt;
-                    }
-                }
-
-                let micros: Vec<MicroTotal> = micro_map
-                    .into_iter()
-                    .map(|(nid, (nm, un, tot))| MicroTotal {
-                        nutrient_id: nid,
-                        name: nm,
-                        unit: un,
-                        total_amount: tot,
-                    })
-                    .collect();
-
-                let report = NutritionReport {
-                    period: Period {
-                        since: since.clone(),
-                        until: until.clone(),
-                    },
-                    total_consumed_items: count,
-                    totals,
-                    micronutrients: micros,
-                };
-
-                if json {
-                    print_json(&report);
-                } else {
-                    println!("Nutrition report ({} items)", count);
-                    if let Some(v) = report.totals.energy_kcal {
-                        println!("  energy: {:.1} kcal", v);
-                    }
-                    if let Some(v) = report.totals.protein_g {
-                        println!("  protein: {:.1} g", v);
-                    }
-                    if let Some(v) = report.totals.carbohydrates_g {
-                        println!("  carbohydrates: {:.1} g", v);
-                    }
-                    if let Some(v) = report.totals.fat_g {
-                        println!("  fat: {:.1} g", v);
-                    }
-                    if let Some(v) = report.totals.fiber_g {
-                        println!("  fiber: {:.1} g", v);
-                    }
-                    if let Some(v) = report.totals.sugars_g {
-                        println!("  sugars: {:.1} g", v);
-                    }
-                    if !report.micronutrients.is_empty() {
-                        println!("  key micros:");
-                        for m in report.micronutrients.iter().take(5) {
-                            println!("    {}: {:.2} {}", m.name, m.total_amount, m.unit);
-                        }
-                    }
-                }
-            }
+            ReportAction::Nutrition { action } => match action {
+                NutritionReportAction::Summary(period) => nutrition_summary(conn, &period, json)?,
+                NutritionReportAction::List(args) => nutrition_list(conn, &args, json)?,
+            },
             ReportAction::Spending {
                 by,
                 since,
@@ -1963,6 +2140,7 @@ mod commands {
                     period: Period {
                         since: since.clone(),
                         until: until.clone(),
+                        days: None,
                     },
                     total_cents,
                     total: format!("${}", cents_to_str(total_cents)),
@@ -2016,7 +2194,10 @@ mod commands {
             let score = name_match_score("Vitamin D", "vit d");
             assert!(score >= 0.8);
             assert_eq!(name_match_score("Vitamin B6", "vit d"), 0.0);
-            assert_eq!(name_match_score("Pantothenic acid (Vitamin B5)", "vit d"), 0.0);
+            assert_eq!(
+                name_match_score("Pantothenic acid (Vitamin B5)", "vit d"),
+                0.0
+            );
         }
 
         #[test]

@@ -256,7 +256,8 @@ fn report_nutrition_basic() {
         .arg(&db)
         .arg("--json")
         .arg("report")
-        .arg("nutrition");
+        .arg("nutrition")
+        .arg("summary");
     let out = cmd.assert().success().get_output().stdout.clone();
     let s = String::from_utf8_lossy(&out);
     // 200/100 * 8 = 16
@@ -268,7 +269,11 @@ fn report_nutrition_basic() {
 
     // Human output should also show fiber (and other macros)
     let mut cmd = nutlog_cmd();
-    cmd.arg("--db").arg(&db).arg("report").arg("nutrition");
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("report")
+        .arg("nutrition")
+        .arg("summary");
     let out = cmd.assert().success().get_output().stdout.clone();
     let s = String::from_utf8_lossy(&out);
     assert!(s.contains("carbohydrates: 24.0 g"));
@@ -484,6 +489,7 @@ fn report_nutrition_single_day_range_includes_afternoon_consumption() {
         .arg("--json")
         .arg("report")
         .arg("nutrition")
+        .arg("summary")
         .arg("--since")
         .arg(&date_str)
         .arg("--until")
@@ -492,6 +498,209 @@ fn report_nutrition_single_day_range_includes_afternoon_consumption() {
     let s = String::from_utf8_lossy(&out);
     assert!(s.contains("\"total_consumed_items\": 1"));
     assert!(s.contains("\"protein_g\": 10.0"));
+}
+
+#[test]
+fn report_nutrition_list_days_protein() {
+    use chrono::{Duration, Local, TimeZone};
+
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let today = Local::now().date_naive();
+    let two_days_ago = today - Duration::days(2);
+    let two_days_ago_str = two_days_ago.format("%Y-%m-%d").to_string();
+    let today_str = today.format("%Y-%m-%d").to_string();
+
+    let two_days_ago_at = Local
+        .from_local_datetime(&two_days_ago.and_hms_opt(12, 0, 0).unwrap())
+        .single()
+        .unwrap()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let today_at = Local
+        .from_local_datetime(&today.and_hms_opt(18, 0, 0).unwrap())
+        .single()
+        .unwrap()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Protein Bar");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("100")
+        .arg("--reference-unit")
+        .arg("g")
+        .arg("--protein-g")
+        .arg("10");
+    cmd.assert().success();
+
+    // 100g two days ago => 10g protein
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("consumption")
+        .arg("create")
+        .arg("1")
+        .arg("--quantity")
+        .arg("100")
+        .arg("--unit")
+        .arg("g")
+        .arg("--date")
+        .arg(&two_days_ago_at);
+    cmd.assert().success();
+
+    // 200g today => 20g protein
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("consumption")
+        .arg("create")
+        .arg("1")
+        .arg("--quantity")
+        .arg("200")
+        .arg("--unit")
+        .arg("g")
+        .arg("--date")
+        .arg(&today_at);
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("report")
+        .arg("nutrition")
+        .arg("list")
+        .arg("--days")
+        .arg("3")
+        .arg("--value")
+        .arg("protein");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"value\": \"protein\""));
+    assert!(s.contains(&format!("\"date\": \"{two_days_ago_str}\"")));
+    assert!(s.contains(&format!("\"date\": \"{today_str}\"")));
+    // middle day and boundaries
+    assert!(s.matches("\"date\":").count() == 3);
+    assert!(s.contains("\"protein_g\": 10.0"));
+    assert!(s.contains("\"protein_g\": 20.0"));
+    assert!(s.contains("\"total_consumed_items\": 0"));
+}
+
+#[test]
+fn report_nutrition_list_macronutrients_json() {
+    use chrono::{Local, TimeZone};
+
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let today = Local::now().date_naive();
+    let today_str = today.format("%Y-%m-%d").to_string();
+    let today_at = Local
+        .from_local_datetime(&today.and_hms_opt(10, 0, 0).unwrap())
+        .single()
+        .unwrap()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("create")
+        .arg("Full Macro Food");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("product")
+        .arg("nutrition")
+        .arg("set")
+        .arg("1")
+        .arg("--reference-quantity")
+        .arg("100")
+        .arg("--reference-unit")
+        .arg("g")
+        .arg("--energy-kcal")
+        .arg("200")
+        .arg("--protein-g")
+        .arg("10")
+        .arg("--carbohydrates-g")
+        .arg("20")
+        .arg("--fat-g")
+        .arg("5")
+        .arg("--fiber-g")
+        .arg("3")
+        .arg("--sugars-g")
+        .arg("4");
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("consumption")
+        .arg("create")
+        .arg("1")
+        .arg("--quantity")
+        .arg("100")
+        .arg("--unit")
+        .arg("g")
+        .arg("--date")
+        .arg(&today_at);
+    cmd.assert().success();
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("--json")
+        .arg("report")
+        .arg("nutrition")
+        .arg("list")
+        .arg("--since")
+        .arg(&today_str)
+        .arg("--until")
+        .arg(&today_str)
+        .arg("--value")
+        .arg("macronutrients");
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let s = String::from_utf8_lossy(&out);
+    assert!(s.contains("\"value\": \"macronutrients\""));
+    assert!(s.contains("\"energy_kcal\": 200.0"));
+    assert!(s.contains("\"protein_g\": 10.0"));
+    assert!(s.contains("\"carbohydrates_g\": 20.0"));
+    assert!(s.contains("\"fat_g\": 5.0"));
+    assert!(s.contains("\"fiber_g\": 3.0"));
+    assert!(s.contains("\"sugars_g\": 4.0"));
+}
+
+#[test]
+fn report_nutrition_list_days_conflicts_with_since() {
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+
+    let mut cmd = nutlog_cmd();
+    cmd.arg("--db")
+        .arg(&db)
+        .arg("report")
+        .arg("nutrition")
+        .arg("list")
+        .arg("--days")
+        .arg("7")
+        .arg("--since")
+        .arg("today");
+    cmd.assert().failure();
 }
 
 #[test]
@@ -542,7 +751,8 @@ fn report_nutrition_scales_micronutrients() {
         .arg(&db)
         .arg("--json")
         .arg("report")
-        .arg("nutrition");
+        .arg("nutrition")
+        .arg("summary");
     let out = cmd.assert().success().get_output().stdout.clone();
     let s = String::from_utf8_lossy(&out);
     // 10g / 5g * 5g creatine = 10 g total

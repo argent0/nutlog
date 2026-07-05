@@ -184,7 +184,12 @@ nutlog consumption delete 5
 
 ```bash
 # Nutrition summary derived from consumption records + product nutrition data
-nutlog --json report nutrition --since 2026-05-01 --until 2026-05-31
+nutlog --json report nutrition summary --since 2026-05-01 --until 2026-05-31
+nutlog --json report nutrition summary --days 7
+
+# Per-day nutrition breakdown
+nutlog --json report nutrition list --days 7 --value protein
+nutlog report nutrition list --value macronutrients --since 2026-05-01 --until 2026-05-31
 
 # Spending
 nutlog --json report spending

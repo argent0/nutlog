@@ -290,9 +290,9 @@ Simple list or JSON array of `Consumption` records (with product_name denormaliz
 
 ## report
 
-### report nutrition [--since D] [--until D]
+### report nutrition summary [--since D] [--until D] [--days N]
 
-Computes totals by looking at all consumption records in the (optional) date range that have corresponding `product_nutritions` rows.
+Aggregate nutrition totals for a period. Computes totals by looking at all consumption records in the (optional) date range that have corresponding `product_nutritions` rows.
 
 For each consumption:
 
@@ -300,11 +300,13 @@ For each consumption:
 - Add `macro_value * scale` to totals.
 - Also aggregates scaled micronutrients (if any were recorded on the product).
 
+`--days N` sets a rolling window of the last N calendar days (inclusive of today) and cannot be combined with `--since`/`--until`.
+
 Output shape (`NutritionReport`):
 
 ```json
 {
-  "period": { "since": "...", "until": "..." },
+  "period": { "since": "...", "until": "...", "days": null },
   "total_consumed_items": 12,
   "totals": {
     "energy_kcal": 1234.5,
@@ -317,10 +319,31 @@ Output shape (`NutritionReport`):
 }
 ```
 
-- Human output is abbreviated (shows main macros + top 5 micros).
+- Human output shows main macros + top 5 micros.
 - Only products that have nutrition data contribute. Others are silently ignored for the report.
 - No unit conversion (see nutrition doc).
 - `total_consumed_items` counts only the consumptions that had nutrition data.
+
+### report nutrition list [--since D] [--until D] [--days N] [--value V]
+
+Per-day nutrition breakdown. Same scaling rules as `summary`, but totals are grouped by local calendar date.
+
+`--value` (default: `macronutrients`): `macronutrients`, `calories`, `protein`, `carbohydrates`, `fat`, `fiber`, `sugars`.
+
+Output shape (`NutritionDailyReport`):
+
+```json
+{
+  "period": { "since": "...", "until": "...", "days": 7 },
+  "value": "protein",
+  "days": [
+    { "date": "2026-07-01", "total_consumed_items": 2, "totals": { "protein_g": 45.0 } }
+  ]
+}
+```
+
+- Bounded periods zero-fill days without consumption.
+- Unbounded (no date flags) returns only days with data.
 
 ### report spending [--by total|store|product] [--since] [--until] [--period ...]
 

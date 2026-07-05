@@ -184,6 +184,22 @@ pub struct NutritionReport {
 pub struct Period {
     pub since: Option<String>,
     pub until: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days: Option<u32>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct NutritionDailyReport {
+    pub period: Period,
+    pub value: String,
+    pub days: Vec<DailyNutritionEntry>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct DailyNutritionEntry {
+    pub date: String,
+    pub total_consumed_items: i64,
+    pub totals: MacroTotals,
 }
 
 #[derive(Serialize, Debug, Default)]

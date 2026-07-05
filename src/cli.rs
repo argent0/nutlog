@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// nutlog - local CLI for logging food purchases, nutrition, and reports.
 /// LLM-agent friendly with --json output.
@@ -361,14 +361,76 @@ pub enum ConsumptionAction {
 
 // ---------- Report ----------
 
+/// Which macro nutrient(s) to show in per-day nutrition list output.
+#[derive(Clone, Copy, Debug, ValueEnum, Eq, PartialEq)]
+pub enum NutritionReportValue {
+    /// All tracked macros (energy, protein, carbohydrates, fat, fiber, sugars).
+    Macronutrients,
+    /// Energy only (kcal).
+    Calories,
+    /// Protein only (g).
+    Protein,
+    /// Carbohydrates only (g).
+    Carbohydrates,
+    /// Fat only (g).
+    Fat,
+    /// Fiber only (g).
+    Fiber,
+    /// Sugars only (g).
+    Sugars,
+}
+
+impl NutritionReportValue {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Macronutrients => "macronutrients",
+            Self::Calories => "calories",
+            Self::Protein => "protein",
+            Self::Carbohydrates => "carbohydrates",
+            Self::Fat => "fat",
+            Self::Fiber => "fiber",
+            Self::Sugars => "sugars",
+        }
+    }
+}
+
+/// Date range flags shared by nutrition report subcommands.
+#[derive(Args, Debug, Clone)]
+pub struct NutritionPeriodArgs {
+    /// Start of period (inclusive). Flexible: today, yesterday, 2026-05-01, etc.
+    #[arg(long)]
+    pub since: Option<String>,
+    /// End of period (inclusive). Same flexible date formats as --since.
+    #[arg(long)]
+    pub until: Option<String>,
+    /// Last N calendar days inclusive of today. Cannot be combined with --since/--until.
+    #[arg(long, conflicts_with_all = ["since", "until"])]
+    pub days: Option<u32>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum NutritionReportAction {
+    /// Aggregate nutrition totals for a period.
+    Summary(NutritionPeriodArgs),
+    /// Per-day nutrition breakdown.
+    List(NutritionListArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct NutritionListArgs {
+    #[command(flatten)]
+    pub period: NutritionPeriodArgs,
+    /// Which macro value(s) to show per day.
+    #[arg(long, value_enum, default_value_t = NutritionReportValue::Macronutrients)]
+    pub value: NutritionReportValue,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum ReportAction {
-    /// Nutrition intake summary based on consumption in period.
+    /// Nutrition intake reports (summary totals or per-day list).
     Nutrition {
-        #[arg(long)]
-        since: Option<String>,
-        #[arg(long)]
-        until: Option<String>,
+        #[command(subcommand)]
+        action: NutritionReportAction,
     },
     /// Spending summary.
     Spending {
