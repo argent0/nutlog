@@ -72,8 +72,36 @@ mod commands {
 
     // ---------- helpers ----------
 
+    /// Header underline only — no outer borders, column dividers, or row separators.
+    /// Matches the tabular style used by repslog for human-readable CLI output.
+    const HEADER_ONLY_PRESET: &str = "    ──              ";
+
     fn print_json<T: serde::Serialize>(v: &T) {
         println!("{}", serde_json::to_string_pretty(v).unwrap());
+    }
+
+    /// Print a compact header-underlined table (repslog-style).
+    fn print_table(headers: Vec<&str>, rows: Vec<Vec<String>>) {
+        if rows.is_empty() {
+            return;
+        }
+        let mut table = Table::new();
+        table.load_preset(HEADER_ONLY_PRESET);
+        table.set_header(headers);
+        for row in rows {
+            table.add_row(row);
+        }
+        for column in table.column_iter_mut() {
+            column.set_padding((0, 1));
+        }
+        println!("{}", table.trim_fmt());
+    }
+
+    fn fmt_opt_f64(v: Option<f64>) -> String {
+        match v {
+            Some(n) => format!("{n:.1}"),
+            None => String::new(),
+        }
     }
 
     fn print_success_json(success: Success) {
@@ -1882,22 +1910,6 @@ mod commands {
         }
     }
 
-    fn format_single_macro_value(totals: &MacroTotals, value: NutritionReportValue) -> String {
-        match value {
-            NutritionReportValue::Calories => {
-                format!("{:.1} kcal", totals.energy_kcal.unwrap_or(0.0))
-            }
-            NutritionReportValue::Protein => format!("{:.1} g", totals.protein_g.unwrap_or(0.0)),
-            NutritionReportValue::Carbohydrates => {
-                format!("{:.1} g", totals.carbohydrates_g.unwrap_or(0.0))
-            }
-            NutritionReportValue::Fat => format!("{:.1} g", totals.fat_g.unwrap_or(0.0)),
-            NutritionReportValue::Fiber => format!("{:.1} g", totals.fiber_g.unwrap_or(0.0)),
-            NutritionReportValue::Sugars => format!("{:.1} g", totals.sugars_g.unwrap_or(0.0)),
-            NutritionReportValue::Macronutrients => String::new(),
-        }
-    }
-
     fn build_daily_entries(
         rows: &[NutritionConsumptionRow],
         fill_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
@@ -1992,23 +2004,71 @@ mod commands {
 
         if json {
             print_json(&report);
+        } else if report.days.is_empty() {
+            println!("Nutrition by day ({}): (no days)", report.value);
         } else if args.value == NutritionReportValue::Macronutrients {
             println!("Nutrition by day ({})", report.value);
-            for day in &report.days {
-                println!("  {} ({} items)", day.date, day.total_consumed_items);
-                print_macro_totals_human(&day.totals, "    ");
-            }
+            let rows: Vec<Vec<String>> = report
+                .days
+                .iter()
+                .map(|day| {
+                    vec![
+                        day.date.clone(),
+                        fmt_opt_f64(day.totals.energy_kcal),
+                        fmt_opt_f64(day.totals.protein_g),
+                        fmt_opt_f64(day.totals.carbohydrates_g),
+                        fmt_opt_f64(day.totals.fat_g),
+                        fmt_opt_f64(day.totals.fiber_g),
+                        fmt_opt_f64(day.totals.sugars_g),
+                        day.total_consumed_items.to_string(),
+                    ]
+                })
+                .collect();
+            print_table(
+                vec![
+                    "Date",
+                    "Energy (kcal)",
+                    "Protein (g)",
+                    "Carbs (g)",
+                    "Fat (g)",
+                    "Fiber (g)",
+                    "Sugars (g)",
+                    "Items",
+                ],
+                rows,
+            );
         } else {
             println!("Nutrition by day ({})", report.value);
-            println!("  {:<12} {:<12} ITEMS", "DATE", "VALUE");
-            for day in &report.days {
-                println!(
-                    "  {:<12} {:<12} {}",
-                    day.date,
-                    format_single_macro_value(&day.totals, args.value),
-                    day.total_consumed_items
-                );
-            }
+            let value_header = match args.value {
+                NutritionReportValue::Calories => "Energy (kcal)",
+                NutritionReportValue::Protein => "Protein (g)",
+                NutritionReportValue::Carbohydrates => "Carbs (g)",
+                NutritionReportValue::Fat => "Fat (g)",
+                NutritionReportValue::Fiber => "Fiber (g)",
+                NutritionReportValue::Sugars => "Sugars (g)",
+                NutritionReportValue::Macronutrients => "Value",
+            };
+            let rows: Vec<Vec<String>> = report
+                .days
+                .iter()
+                .map(|day| {
+                    let amount = match args.value {
+                        NutritionReportValue::Calories => day.totals.energy_kcal,
+                        NutritionReportValue::Protein => day.totals.protein_g,
+                        NutritionReportValue::Carbohydrates => day.totals.carbohydrates_g,
+                        NutritionReportValue::Fat => day.totals.fat_g,
+                        NutritionReportValue::Fiber => day.totals.fiber_g,
+                        NutritionReportValue::Sugars => day.totals.sugars_g,
+                        NutritionReportValue::Macronutrients => None,
+                    };
+                    vec![
+                        day.date.clone(),
+                        fmt_opt_f64(amount),
+                        day.total_consumed_items.to_string(),
+                    ]
+                })
+                .collect();
+            print_table(vec!["Date", value_header, "Items"], rows);
         }
         Ok(())
     }

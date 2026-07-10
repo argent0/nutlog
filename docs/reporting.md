@@ -99,6 +99,11 @@ Micronutrients are not included in `list` output.
 
 #### Output
 
+Human mode prints a compact header-underlined table (one row per day), same style as repslog:
+
+- `--value macronutrients` (default): columns `Date`, `Energy (kcal)`, `Protein (g)`, `Carbs (g)`, `Fat (g)`, `Fiber (g)`, `Sugars (g)`, `Items`
+- Single-macro `--value`: columns `Date`, the selected nutrient with unit in the header, `Items`
+
 JSON mode returns a `NutritionDailyReport`:
 
 ```json

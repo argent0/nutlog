@@ -330,7 +330,9 @@ Per-day nutrition breakdown. Same scaling rules as `summary`, but totals are gro
 
 `--value` (default: `macronutrients`): `macronutrients`, `calories`, `protein`, `carbohydrates`, `fat`, `fiber`, `sugars`.
 
-Output shape (`NutritionDailyReport`):
+Human mode: compact header-underlined table (one row per day). Units are in column headers; cells are bare numbers.
+
+JSON output shape (`NutritionDailyReport`):
 
 ```json
 {
